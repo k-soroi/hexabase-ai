@@ -9,17 +9,23 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/gin-gonic/gin v1.10.1
+	github.com/go-faster/errors v0.7.1
+	github.com/go-faster/jx v1.1.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0
 	github.com/google/wire v0.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/jarcoal/httpmock v1.4.0
 	github.com/lib/pq v1.10.9
+	github.com/ogen-go/ogen v1.14.0
 	github.com/redis/go-redis/v9 v9.9.0
 	github.com/spf13/viper v1.17.0
 	github.com/stretchr/testify v1.10.0
 	github.com/stripe/stripe-go/v74 v74.30.0
 	github.com/tektoncd/pipeline v0.53.0
+	go.opentelemetry.io/otel v1.36.0
+	go.opentelemetry.io/otel/metric v1.36.0
+	go.opentelemetry.io/otel/trace v1.36.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/oauth2 v0.30.0
 	gopkg.in/yaml.v2 v2.4.0
@@ -182,12 +188,13 @@ require (
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/fzipp/gocyclo v0.6.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.9 // indirect
+	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/ghostiam/protogetter v0.3.15 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
 	github.com/go-critic/go-critic v0.13.0 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
-	github.com/go-faster/errors v0.7.1 // indirect
+	github.com/go-faster/yaml v0.4.6 // indirect
 	github.com/go-gorp/gorp/v3 v3.1.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.0.5 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
@@ -448,11 +455,8 @@ require (
 	go.opentelemetry.io/contrib/detectors/gcp v1.35.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.61.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
-	go.opentelemetry.io/otel v1.36.0 // indirect
-	go.opentelemetry.io/otel/metric v1.36.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.36.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.36.0 // indirect
-	go.opentelemetry.io/otel/trace v1.36.0 // indirect
 	go.starlark.net v0.0.0-20230525235612-a134d8f9ddca // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect

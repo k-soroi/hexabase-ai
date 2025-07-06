@@ -1,0 +1,11 @@
+SignUpErrorResponse:
+  description: Bad request or server error
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            description: "Detailed error message."
+            example: "invalid provider or configuration error"

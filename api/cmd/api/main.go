@@ -153,7 +153,10 @@ func main() {
 	}
 
 	// Setup routes
-	routes.SetupRoutes(router, app)
+	if err := routes.SetupRoutes(router, app); err != nil {
+		logger.Error("Failed to setup routes", "error", err)
+		os.Exit(1)
+	}
 
 	// Create HTTP server
 	srv := &http.Server{

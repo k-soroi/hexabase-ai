@@ -12,4 +12,10 @@ var (
 
 	// ErrAuthStateNotFound is returned when an auth state is not found
 	ErrAuthStateNotFound = errors.New("auth state not found")
+
+	// ErrUnsupportedProvider is returned when an unsupported OAuth provider is requested
+	ErrUnsupportedProvider = errors.New("unsupported provider")
+
+	// ErrInvalidRequest is returned when a request is invalid
+	ErrInvalidRequest = errors.New("invalid request")
 )

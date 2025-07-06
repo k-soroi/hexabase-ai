@@ -1,0 +1,38 @@
+AuthSignUp:
+  post:
+    operationId: startAuthSignUp
+    tags:
+      - Authentication
+    summary: Start sign-up process
+    description: |
+      Starts the OAuth 2.0 authentication flow with the specified provider (Google, GitHub, etc.).
+      On success, returns an authentication URL where the user should be redirected, and a state parameter to prevent CSRF attacks.
+      This endpoint is primarily intended for calls from web frontends or CLI tools.
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        description: OAuth provider to use for authentication.
+        schema:
+          type: string
+          enum: [google, github]
+    requestBody:
+      description: Information to start the authentication flow.
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../openapi.yaml#/components/schemas/SignUpRequest'
+    responses:
+      '200':
+        description: Successfully generated authentication URL. Redirect the user to the returned `auth_url`.
+        content:
+          application/json:
+            schema:
+              $ref: '../openapi.yaml#/components/schemas/SignUpResponse'
+      '400':
+        description: Bad request. The provider name may be incorrect or there may be a configuration issue on the server side.
+        $ref: '../openapi.yaml#/components/responses/ErrorResponse'
+      default:
+        description: Unexpected server error
+        $ref: '../openapi.yaml#/components/responses/ErrorResponse'

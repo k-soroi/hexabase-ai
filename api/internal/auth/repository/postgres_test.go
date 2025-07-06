@@ -111,7 +111,7 @@ func TestPostgresRepository_GetUser(t *testing.T) {
 		now := time.Now()
 
 		rows := sqlmock.NewRows([]string{
-			"id", "external_id", "provider", "email", "display_name", "avatar_url", 
+			"id", "external_id", "provider", "email", "display_name", "avatar_url",
 			"created_at", "updated_at", "last_login_at",
 		}).AddRow(
 			userID, "google-sub-123", "google", "user@example.com", "Test User", "",
@@ -342,13 +342,13 @@ func TestPostgresRepository_GetAllActiveSessions(t *testing.T) {
 
 		// Mock the query for active sessions
 		rows := sqlmock.NewRows([]string{
-			"id", "user_id", "refresh_token", "salt", "device_id", 
+			"id", "user_id", "refresh_token", "salt", "device_id",
 			"ip_address", "user_agent", "expires_at", "created_at", "last_used_at", "revoked",
 		}).
-		AddRow(sessionID1, userID1, "hash1", "salt1", "device-123",
-			"192.168.1.1", "test-agent", now.Add(time.Hour), now, now, false).
-		AddRow(sessionID2, userID2, "hash2", "salt2", "device-456", 
-			"192.168.1.2", "test-agent", now.Add(2*time.Hour), now, now, false)
+			AddRow(sessionID1, userID1, "hash1", "salt1", "device-123",
+				"192.168.1.1", "test-agent", now.Add(time.Hour), now, now, false).
+			AddRow(sessionID2, userID2, "hash2", "salt2", "device-456",
+				"192.168.1.2", "test-agent", now.Add(2*time.Hour), now, now, false)
 
 		mock.ExpectQuery(`SELECT \* FROM "sessions" WHERE revoked = \$1 AND expires_at > \$2`).
 			WithArgs(false, sqlmock.AnyArg()).
@@ -411,9 +411,11 @@ func TestPostgresRepository_StoreAuthState(t *testing.T) {
 			CreatedAt:     time.Now(),
 		}
 
-		// Expect the INSERT query with the new code_challenge column
+		// Expect the INSERT query with the new code_challenge and is_sign_up columns
 		mock.ExpectBegin()
-		mock.ExpectExec(`INSERT INTO "auth_states" \("state","provider","redirect_url","code_challenge","client_ip","user_agent","expires_at","created_at"\)`).
+		mock.ExpectExec(`INSERT INTO "auth_states" `+
+			`\("state","provider","redirect_url","code_challenge","client_ip","user_agent",`+
+			`"is_sign_up","expires_at","created_at"\)`).
 			WithArgs(
 				authState.State,
 				authState.Provider,
@@ -421,6 +423,7 @@ func TestPostgresRepository_StoreAuthState(t *testing.T) {
 				authState.CodeChallenge,
 				authState.ClientIP,
 				authState.UserAgent,
+				authState.IsSignUp,
 				sqlmock.AnyArg(), // expires_at
 				sqlmock.AnyArg(), // created_at
 			).
@@ -453,6 +456,7 @@ func TestPostgresRepository_StoreAuthState(t *testing.T) {
 				authState.CodeChallenge,
 				authState.ClientIP,
 				authState.UserAgent,
+				authState.IsSignUp,
 				sqlmock.AnyArg(),
 				sqlmock.AnyArg(),
 			).
@@ -478,7 +482,7 @@ func TestPostgresRepository_GetAuthState(t *testing.T) {
 
 		// Expect the SELECT query to include code_challenge column
 		rows := sqlmock.NewRows([]string{
-			"state", "provider", "redirect_url", "code_challenge", 
+			"state", "provider", "redirect_url", "code_challenge",
 			"client_ip", "user_agent", "expires_at", "created_at",
 		}).AddRow(
 			stateValue,
@@ -575,6 +579,7 @@ func TestPostgresRepository_AuthStateColumnCompatibility(t *testing.T) {
 				authState.CodeChallenge,
 				sqlmock.AnyArg(),
 				sqlmock.AnyArg(),
+				sqlmock.AnyArg(), // is_sign_up
 				sqlmock.AnyArg(),
 				sqlmock.AnyArg(),
 			).
@@ -689,7 +694,7 @@ func TestPostgresRepository_GetSessionByRefreshTokenSelector(t *testing.T) {
 		now := time.Now()
 
 		rows := sqlmock.NewRows([]string{
-			"id", "user_id", "refresh_token", "refresh_token_selector", "salt", 
+			"id", "user_id", "refresh_token", "refresh_token_selector", "salt",
 			"device_id", "ip_address", "user_agent", "expires_at", "created_at", "last_used_at", "revoked",
 		}).AddRow(
 			"session-123", "user-456", "hashed-verifier-789", selector, "salt-def456",

@@ -8,6 +8,7 @@ import (
 type Service interface {
 	// OAuth operations
 	GetAuthURL(ctx context.Context, req *LoginRequest) (string, string, error)
+	GetAuthURLForSignUp(ctx context.Context, req *SignUpAuthRequest) (string, string, error)
 	HandleCallback(ctx context.Context, req *CallbackRequest, clientIP, userAgent string) (*AuthResponse, error)
 
 	// Token operations

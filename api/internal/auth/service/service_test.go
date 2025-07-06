@@ -16,6 +16,7 @@ import (
 	"github.com/hexabase/hexabase-ai/api/internal/auth/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // Mock repository
@@ -396,8 +397,10 @@ func TestService_GetAuthURL(t *testing.T) {
 
 		expectedURL := "https://accounts.google.com/o/oauth2/v2/auth?state=random-state-123"
 
-		// Mock repository calls
-		mockRepo.On("StoreAuthState", ctx, mock.AnythingOfType("*domain.AuthState")).Return(nil)
+		// Mock repository calls - verify IsSignUp is false for login
+		mockRepo.On("StoreAuthState", ctx, mock.MatchedBy(func(state *domain.AuthState) bool {
+			return state.IsSignUp == false && state.Provider == "google"
+		})).Return(nil)
 		mockOAuthRepo.On("GetAuthURL", "google", mock.AnythingOfType("string"), mock.Anything).Return(expectedURL, nil)
 
 		url, state, err := svc.GetAuthURL(ctx, req)
@@ -425,7 +428,164 @@ func TestService_GetAuthURL(t *testing.T) {
 	})
 }
 
+//nolint:funlen // comprehensive test coverage for sign-up functionality
+func TestService_GetAuthURLForSignUp(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	t.Run("successful get auth URL for sign-up", func(t *testing.T) {
+		t.Parallel()
+
+		mockRepo := new(mockRepository)
+		mockOAuthRepo := new(mockOAuthRepository)
+		mockKeyRepo := new(mockKeyRepository)
+		mockTokenDomainService := new(mockTokenDomainService)
+
+		// Create a dummy TokenManager
+		testPrivateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		testPublicKey := &testPrivateKey.PublicKey
+		tokenManager := internalAuth.NewTokenManager(testPrivateKey, testPublicKey, "test-issuer", time.Hour)
+
+		svc := &service{
+			repo:               mockRepo,
+			oauthRepo:          mockOAuthRepo,
+			keyRepo:            mockKeyRepo,
+			tokenManager:       tokenManager,
+			tokenDomainService: mockTokenDomainService,
+			logger:             slog.Default(),
+			defaultTokenExpiry: 3600, // 1 hour default
+		}
+
+		req := &domain.SignUpAuthRequest{
+			Provider:            "google",
+			CodeChallenge:       "challenge123",
+			CodeChallengeMethod: "S256",
+		}
+
+		// Mock storing auth state - verify IsSignUp is true for sign-up
+		mockRepo.On("StoreAuthState", ctx, mock.MatchedBy(func(state *domain.AuthState) bool {
+			return state.Provider == "google" && state.CodeChallenge == "challenge123" && state.IsSignUp == true
+		})).Return(nil)
+
+		// Mock getting auth URL
+		expectedURL := "https://accounts.google.com/o/oauth2/v2/auth?client_id=123"
+		mockOAuthRepo.On("GetAuthURL", "google", mock.AnythingOfType("string"),
+			mock.MatchedBy(func(params map[string]string) bool {
+				return params["code_challenge"] == "challenge123" && params["code_challenge_method"] == "S256"
+			})).Return(expectedURL, nil)
+
+		// Call the method
+		url, state, err := svc.GetAuthURLForSignUp(ctx, req)
+
+		// Assertions
+		require.NoError(t, err)
+		assert.Equal(t, expectedURL, url)
+		assert.NotEmpty(t, state)
+
+		mockRepo.AssertExpectations(t)
+		mockOAuthRepo.AssertExpectations(t)
+	})
+
+	t.Run("successful get auth URL for sign-up without PKCE", func(t *testing.T) {
+		t.Parallel()
+
+		mockRepo := new(mockRepository)
+		mockOAuthRepo := new(mockOAuthRepository)
+		mockKeyRepo := new(mockKeyRepository)
+		mockTokenDomainService := new(mockTokenDomainService)
+
+		// Create a dummy TokenManager
+		testPrivateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		testPublicKey := &testPrivateKey.PublicKey
+		tokenManager := internalAuth.NewTokenManager(testPrivateKey, testPublicKey, "test-issuer", time.Hour)
+
+		svc := &service{
+			repo:               mockRepo,
+			oauthRepo:          mockOAuthRepo,
+			keyRepo:            mockKeyRepo,
+			tokenManager:       tokenManager,
+			tokenDomainService: mockTokenDomainService,
+			logger:             slog.Default(),
+			defaultTokenExpiry: 3600, // 1 hour default
+		}
+
+		req := &domain.SignUpAuthRequest{
+			Provider: "github",
+		}
+
+		// Mock storing auth state - verify IsSignUp is true for sign-up
+		mockRepo.On("StoreAuthState", ctx, mock.MatchedBy(func(state *domain.AuthState) bool {
+			return state.Provider == "github" && state.CodeChallenge == "" && state.IsSignUp == true
+		})).Return(nil)
+
+		// Mock getting auth URL
+		expectedURL := "https://github.com/login/oauth/authorize?client_id=456"
+		mockOAuthRepo.On("GetAuthURL", "github", mock.AnythingOfType("string"),
+			mock.MatchedBy(func(params map[string]string) bool {
+				return len(params) == 0 || (params["code_challenge"] == "" && params["code_challenge_method"] == "")
+			})).Return(expectedURL, nil)
+
+		// Call the method
+		url, state, err := svc.GetAuthURLForSignUp(ctx, req)
+
+		// Assertions
+		require.NoError(t, err)
+		assert.Equal(t, expectedURL, url)
+		assert.NotEmpty(t, state)
+
+		mockRepo.AssertExpectations(t)
+		mockOAuthRepo.AssertExpectations(t)
+	})
+
+	t.Run("invalid provider", func(t *testing.T) {
+		t.Parallel()
+
+		mockRepo := new(mockRepository)
+		mockOAuthRepo := new(mockOAuthRepository)
+		mockKeyRepo := new(mockKeyRepository)
+		mockTokenDomainService := new(mockTokenDomainService)
+
+		// Create a dummy TokenManager
+		testPrivateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		testPublicKey := &testPrivateKey.PublicKey
+		tokenManager := internalAuth.NewTokenManager(testPrivateKey, testPublicKey, "test-issuer", time.Hour)
+
+		svc := &service{
+			repo:               mockRepo,
+			oauthRepo:          mockOAuthRepo,
+			keyRepo:            mockKeyRepo,
+			tokenManager:       tokenManager,
+			tokenDomainService: mockTokenDomainService,
+			logger:             slog.Default(),
+			defaultTokenExpiry: 3600, // 1 hour default
+		}
+
+		req := &domain.SignUpAuthRequest{
+			Provider: "invalid-provider",
+		}
+
+		// Mock storing auth state
+		mockRepo.On("StoreAuthState", ctx, mock.AnythingOfType("*domain.AuthState")).Return(nil)
+
+		// Mock getting auth URL - returns error for unsupported provider
+		mockOAuthRepo.On("GetAuthURL", "invalid-provider", mock.AnythingOfType("string"),
+			mock.AnythingOfType("map[string]string")).Return("", domain.ErrUnsupportedProvider)
+
+		// Call the method
+		url, state, err := svc.GetAuthURLForSignUp(ctx, req)
+
+		// Assertions
+		require.Error(t, err)
+		assert.Empty(t, url)
+		assert.Empty(t, state)
+	})
+}
+
+//nolint:funlen // TODO: Refactor this test to reduce complexity
 func TestService_HandleCallback(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	svc, mockRepo, mockOAuthRepo, mockTokenDomainService, mockSessionManager := setupTestService()
 
@@ -773,12 +933,12 @@ func TestService_RefreshToken(t *testing.T) {
 
 		// Create an expired session
 		expiredSession := &domain.Session{
-			ID:                   "expired-session-id",
-			UserID:               "user-123",
-			RefreshToken:         refreshToken,
-			RefreshTokenSelector: selector,
-			Salt:                 "salt1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab",
-			ExpiresAt:            time.Now().Add(-24 * time.Hour),
+		 ID:                   "expired-session-id",
+		 UserID:               "user-123",
+		 RefreshToken:         refreshToken,
+		 RefreshTokenSelector: selector,
+		 Salt:                 "salt1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab",
+		 ExpiresAt:            time.Now().Add(-24 * time.Hour),
 		}
 
 		mockRepo.On("IsRefreshTokenBlacklisted", ctx, refreshToken).Return(false, nil).Once()

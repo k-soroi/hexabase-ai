@@ -114,6 +114,7 @@ func InitializeApp(cfg *config.Config, db *gorm.DB, k8sClient kubernetes.Interfa
 	int2 := ProvideDefaultTokenExpiry()
 	service14 := service2.NewService(repository14, oAuthRepository, keyRepository, tokenManager, tokenDomainService, sessionManager, logger, int2)
 	handlerHandler := handler2.NewHandler(service14, logger)
+	ogenAuthHandler := handler2.NewOgenAuthHandler(service14, logger)
 	repository15 := repository3.NewPostgresRepository(db)
 	proxmoxRepository := ProvideBackupProxmoxRepository(cfg)
 	repository16 := repository4.NewPostgresRepository(db)
@@ -188,7 +189,7 @@ func InitializeApp(cfg *config.Config, db *gorm.DB, k8sClient kubernetes.Interfa
 	repository26 := repository13.NewClickHouseRepository(v2, logger)
 	service26 := service13.NewLogService(repository26, logger)
 	internalHandler := ProvideInternalHandler(service22, service21, domainService, service19, service26, service18, service25, service17, service15, logger)
-	app := NewApp(applicationHandler, handlerHandler, handler13, handler14, handler15, handler16, handler17, handler18, handler19, handler20, handler21, handler22, ginHandler, aiOpsProxyHandler, internalHandler, service26)
+	app := NewApp(applicationHandler, handlerHandler, ogenAuthHandler, handler13, handler14, handler15, handler16, handler17, handler18, handler19, handler20, handler21, handler22, ginHandler, aiOpsProxyHandler, internalHandler, service26)
 	return app, nil
 }
 
@@ -200,7 +201,7 @@ var ApplicationSet = wire.NewSet(repository.NewPostgresRepository, repository.Ne
 var AuthSet = wire.NewSet(
 	ProvideRedisClient, repository2.NewPostgresRepository, repository2.NewRedisAuthRepository, repository2.NewTokenHashRepository, repository2.NewCompositeRepository, repository2.NewOAuthRepository, repository2.NewKeyRepository, repository2.NewSessionLimiterRepository, ProvideTokenManager,
 	ProvideTokenDomainService,
-	ProvideDefaultTokenExpiry, service2.NewSessionManager, service2.NewService, handler2.NewHandler,
+	ProvideDefaultTokenExpiry, service2.NewSessionManager, service2.NewService, handler2.NewHandler, handler2.NewOgenAuthHandler,
 )
 
 var OrganizationSet = wire.NewSet(repository9.NewPostgresRepository, repository9.NewAuthRepositoryAdapter, repository9.NewBillingRepositoryAdapter, service8.NewService, handler8.NewHandler)
@@ -246,6 +247,7 @@ var InternalSet = wire.NewSet(ProvideInternalHandler)
 type App struct {
 	ApplicationHandler  *handler.ApplicationHandler
 	AuthHandler         *handler2.Handler
+	OgenAuthHandler     *handler2.OgenAuthHandler
 	BackupHandler       *handler3.Handler
 	BillingHandler      *handler4.Handler
 	CICDHandler         *handler5.Handler
@@ -265,6 +267,7 @@ type App struct {
 func NewApp(
 	appH *handler.ApplicationHandler,
 	authH *handler2.Handler,
+	ogenAuthH *handler2.OgenAuthHandler,
 	backupH *handler3.Handler,
 	billH *handler4.Handler,
 	cicdH *handler5.Handler,
@@ -283,6 +286,7 @@ func NewApp(
 	return &App{
 		ApplicationHandler:  appH,
 		AuthHandler:         authH,
+		OgenAuthHandler:     ogenAuthH,
 		BackupHandler:       backupH,
 		BillingHandler:      billH,
 		CICDHandler:         cicdH,

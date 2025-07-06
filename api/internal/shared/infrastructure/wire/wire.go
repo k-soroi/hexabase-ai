@@ -129,6 +129,7 @@ var AuthSet = wire.NewSet(
 	authSvc.NewSessionManager,
 	authSvc.NewService,
 	authHandler.NewHandler,
+	authHandler.NewOgenAuthHandler,
 )
 
 var OrganizationSet = wire.NewSet(
@@ -230,6 +231,7 @@ var InternalSet = wire.NewSet(ProvideInternalHandler)
 type App struct {
 	ApplicationHandler  *applicationHandler.ApplicationHandler
 	AuthHandler        *authHandler.Handler
+	OgenAuthHandler    *authHandler.OgenAuthHandler
 	BackupHandler      *backupHandler.Handler
 	BillingHandler     *billingHandler.Handler
 	CICDHandler        *cicdHandler.Handler
@@ -249,6 +251,7 @@ type App struct {
 func NewApp(
 	appH *applicationHandler.ApplicationHandler,
 	authH *authHandler.Handler,
+	ogenAuthH *authHandler.OgenAuthHandler,
 	backupH *backupHandler.Handler,
 	billH *billingHandler.Handler,
 	cicdH *cicdHandler.Handler,
@@ -267,6 +270,7 @@ func NewApp(
 	return &App{
 		ApplicationHandler:  appH,
 		AuthHandler:        authH,
+		OgenAuthHandler:    ogenAuthH,
 		BackupHandler:      backupH,
 		BillingHandler:     billH,
 		CICDHandler:        cicdH,

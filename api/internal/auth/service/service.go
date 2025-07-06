@@ -93,6 +93,7 @@ func (s *service) GetAuthURL(ctx context.Context, req *domain.LoginRequest) (str
 		Provider:      req.Provider,
 		RedirectURL:   req.RedirectURL,
 		CodeChallenge: codeChallenge, // Store for later verification
+		IsSignUp:      false,         // Mark this as a login flow
 		ExpiresAt:     time.Now().Add(10 * time.Minute),
 		CreatedAt:     time.Now(),
 	}
@@ -105,6 +106,48 @@ func (s *service) GetAuthURL(ctx context.Context, req *domain.LoginRequest) (str
 	params := map[string]string{}
 	if codeChallenge != "" {
 		params["code_challenge"] = codeChallenge
+		params["code_challenge_method"] = req.CodeChallengeMethod
+	}
+
+	authURL, err := s.oauthRepo.GetAuthURL(req.Provider, state, params)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get auth URL: %w", err)
+	}
+
+	return authURL, state, nil
+}
+
+func (s *service) GetAuthURLForSignUp(ctx context.Context, req *domain.SignUpAuthRequest) (string, string, error) {
+	// Generate state
+	const stateByteLength = 32
+
+	stateBytes := make([]byte, stateByteLength)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return "", "", fmt.Errorf("failed to generate state: %w", err)
+	}
+
+	state := base64.URLEncoding.EncodeToString(stateBytes)
+
+	// Store auth state
+	const authStateExpiration = 10 * time.Minute
+
+	authState := &domain.AuthState{
+		State:         state,
+		Provider:      req.Provider,
+		CodeChallenge: req.CodeChallenge,
+		IsSignUp:      true, // Mark this as a sign-up flow
+		ExpiresAt:     time.Now().Add(authStateExpiration),
+		CreatedAt:     time.Now(),
+	}
+
+	if err := s.repo.StoreAuthState(ctx, authState); err != nil {
+		return "", "", fmt.Errorf("failed to store auth state: %w", err)
+	}
+
+	// Get auth URL with parameters
+	params := map[string]string{}
+	if req.CodeChallenge != "" {
+		params["code_challenge"] = req.CodeChallenge
 		params["code_challenge_method"] = req.CodeChallengeMethod
 	}
 

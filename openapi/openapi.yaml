@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: Hexabase KaaS API
+  version: 0.1.0
+  description: |
+    Hexabase KaaS API Specification.
+  contact:
+    name: API Support
+    email: api-support@example.com
+
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /auth/sign-up/{provider}:
+    $ref: './paths/auth.yaml#/AuthSignUp'
+
+components:
+  schemas:
+    SignUpRequest:
+      $ref: './components/schemas/auth.yaml#/SignUpRequest'
+    SignUpResponse:
+      $ref: './components/schemas/auth.yaml#/SignUpResponse'
+  responses:
+    ErrorResponse:
+      $ref: './components/responses/error.yaml#/SignUpErrorResponse'
+
+tags:
+  - name: Authentication
+    description: Authentication related endpoints

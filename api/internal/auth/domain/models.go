@@ -67,8 +67,8 @@ func (c *Claims) ValidateBusinessRules() error {
 	if c.SessionID == "" {
 		return errors.New("session_id claim is required")
 	}
-	
-// Removed commented-out TODOs and dead code related to legacy session logging.
+
+	// Removed commented-out TODOs and dead code related to legacy session logging.
 
 	// Validate expiration within acceptable range
 	if c.ExpiresAt != nil {
@@ -77,7 +77,7 @@ func (c *Claims) ValidateBusinessRules() error {
 			return errors.New("token expiry exceeds maximum allowed duration")
 		}
 	}
-	
+
 	return nil
 }
 
@@ -93,10 +93,10 @@ type WorkspaceClaims struct {
 // for refresh tokens to enhance security and performance.
 //
 // The Selector/Validator model splits a refresh token into two parts:
-// 1. Selector: A public, unique identifier used for O(1) database lookups to find a session.
-//    It is stored in plain text in the database.
-// 2. Verifier: A high-entropy secret part that is hashed before being stored.
-//    The client sends both parts, and the server verifies the verifier hash against the stored hash.
+//  1. Selector: A public, unique identifier used for O(1) database lookups to find a session.
+//     It is stored in plain text in the database.
+//  2. Verifier: A high-entropy secret part that is hashed before being stored.
+//     The client sends both parts, and the server verifies the verifier hash against the stored hash.
 //
 // This approach prevents timing attacks by ensuring the database lookup time is constant
 // regardless of whether the token is valid, and it allows for efficient session retrieval
@@ -104,7 +104,7 @@ type WorkspaceClaims struct {
 type Session struct {
 	ID                   string    `json:"id"`
 	UserID               string    `json:"user_id"`
-	RefreshToken         string    `json:"refresh_token"`         // Hashed verifier part of the refresh token
+	RefreshToken         string    `json:"refresh_token"`          // Hashed verifier part of the refresh token
 	RefreshTokenSelector string    `json:"refresh_token_selector"` // Selector part for O(1) session lookup
 	Salt                 string    `json:"salt"`                   // Salt for refresh token hashing
 	DeviceID             string    `json:"device_id,omitempty"`
@@ -152,14 +152,21 @@ func (s *Session) ValidateRefreshTokenSelector() error {
 
 // AuthState represents OAuth state data stored temporarily during the auth flow.
 type AuthState struct {
-	State         string    `gorm:"primaryKey" json:"state"` // gorm:primaryKey - Uniquely identifies the auth request.
-	Provider      string    `gorm:"not null" json:"provider"`   // gorm:not null - Required to identify the auth provider on callback.
-	RedirectURL   string    `json:"redirect_url,omitempty"`
-	CodeChallenge string    `json:"code_challenge,omitempty"` // RFC 7636: Stores the code challenge (SHA256 hash of verifier)
-	ClientIP      string    `json:"client_ip"`
-	UserAgent     string    `json:"user_agent"`
-	ExpiresAt    time.Time `gorm:"index;not null" json:"expires_at"` // gorm:index - For efficient lookup of active states. gorm:not null - States must expire.
-	CreatedAt    time.Time `gorm:"not null" json:"created_at"`       // gorm:not null - Ensures creation timestamp exists for auditing.
+	// gorm:primaryKey - Uniquely identifies the auth request.
+	State string `gorm:"primaryKey"     json:"state"`
+	// gorm:not null - Required to identify the auth provider on callback.
+	Provider    string `gorm:"not null"       json:"provider"`
+	RedirectURL string `                      json:"redirect_url,omitempty"`
+	// RFC 7636: Stores the code challenge (SHA256 hash of verifier)
+	CodeChallenge string `                      json:"code_challenge,omitempty"`
+	ClientIP      string `                      json:"client_ip"`
+	UserAgent     string `                      json:"user_agent"`
+	// Indicates if this auth flow is for sign-up
+	IsSignUp bool `                      json:"is_sign_up"`
+	// gorm:index - For efficient lookup of active states. gorm:not null - States must expire.
+	ExpiresAt time.Time `gorm:"index;not null" json:"expires_at"`
+	// gorm:not null - Ensures creation timestamp exists for auditing.
+	CreatedAt time.Time `gorm:"not null"       json:"created_at"`
 }
 
 // SecurityEvent represents a security-related event
@@ -185,7 +192,7 @@ func (SecurityEvent) TableName() string {
 
 // LoginRequest represents OAuth login request
 type LoginRequest struct {
-	Provider            string `json:"provider" binding:"required"`
+	Provider            string `json:"provider"                        binding:"required"`
 	CodeChallenge       string `json:"code_challenge,omitempty"`
 	CodeChallengeMethod string `json:"code_challenge_method,omitempty"`
 	RedirectURL         string `json:"redirect_url,omitempty"`
@@ -193,9 +200,17 @@ type LoginRequest struct {
 
 // CallbackRequest represents OAuth callback request
 type CallbackRequest struct {
-	Code         string `json:"code" binding:"required"`
-	State        string `json:"state" binding:"required"`
+	Code         string `json:"code"                    binding:"required"`
+	State        string `json:"state"                   binding:"required"`
 	CodeVerifier string `json:"code_verifier,omitempty"`
+}
+
+// SignUpAuthRequest represents OAuth sign-up request
+type SignUpAuthRequest struct {
+	Provider string `json:"provider" binding:"required"` //nolint:golines
+	// provider is required for sign-up
+	CodeChallenge       string `json:"code_challenge,omitempty"`
+	CodeChallengeMethod string `json:"code_challenge_method,omitempty"`
 }
 
 // RefreshTokenRequest represents token refresh request
@@ -214,11 +229,11 @@ type UserInfo struct {
 
 // AuthResponse represents authentication response
 type AuthResponse struct {
-	User         *User      `json:"user"`
-	AccessToken  string     `json:"access_token"`
-	RefreshToken string     `json:"refresh_token"`
-	TokenType    string     `json:"token_type"`
-	ExpiresIn    int        `json:"expires_in"`
+	User         *User  `json:"user"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
 }
 
 // SessionInfo represents session information

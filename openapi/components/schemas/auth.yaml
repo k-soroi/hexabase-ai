@@ -1,0 +1,35 @@
+SignUpRequest:
+  type: object
+  required:
+    - provider
+  properties:
+    provider:
+      type: string
+      description: "OAuth provider to use for authentication."
+      enum: [google, github]
+      example: "google"
+    code_challenge:
+      type: string
+      description: "Code challenge used in PKCE flow. Generated on the client side."
+      example: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+    code_challenge_method:
+      type: string
+      description: "Hash algorithm used to generate the code challenge. Currently only 'S256' is supported."
+      example: "S256"
+
+SignUpResponse:
+  type: object
+  properties:
+    provider:
+      type: string
+      description: "The requested provider name."
+      example: "google"
+    auth_url:
+      type: string
+      format: uri
+      description: "URL of the provider's authentication page where the user should be redirected."
+      example: "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=...&scope=...&redirect_uri=..."
+    state:
+      type: string
+      description: "Random string for CSRF protection. The client must retain this value and verify it during callback."
+      example: "aAbBcC123dDeEfF456"

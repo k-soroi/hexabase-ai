@@ -1,11 +1,13 @@
 package routes
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	authHandler "github.com/hexabase/hexabase-ai/api/internal/auth/handler"
+	"github.com/hexabase/hexabase-ai/api/internal/shared/infrastructure/server/ogen"
 	"github.com/hexabase/hexabase-ai/api/internal/shared/infrastructure/wire"
 	"github.com/hexabase/hexabase-ai/api/internal/shared/utils/httpauth"
 )
@@ -48,15 +50,35 @@ func isValidInternalToken(token string) bool {
 	return strings.HasPrefix(token, "internal_") || strings.HasPrefix(token, "ai_agent_")
 }
 
+// wrapOgenHandler wraps an ogen server as a Gin handler
+func wrapOgenHandler(ogenServer *ogen.Server) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Set default Content-Type if not provided (for compatibility with existing behavior)
+		if c.Request.Header.Get("Content-Type") == "" && c.Request.Method == http.MethodPost {
+			c.Request.Header.Set("Content-Type", "application/json")
+		}
+
+		ogenServer.ServeHTTP(c.Writer, c.Request)
+	}
+}
+
 // SetupRoutes configures all API routes
-func SetupRoutes(router *gin.Engine, app *wire.App) {
+//nolint:funlen,maintidx // TODO: Refactor this function to reduce complexity
+func SetupRoutes(router *gin.Engine, app *wire.App) error {
 	// API version 1
 	v1 := router.Group("/api/v1")
+
+	// Create ogen server for OpenAPI-based endpoints
+	ogenServer, err := ogen.NewServer(app.OgenAuthHandler)
+	if err != nil {
+		return fmt.Errorf("failed to create ogen server: %w", err)
+	}
 
 	// Authentication routes
 	auth := router.Group("/auth")
 	{
 		auth.POST("/login/:provider", app.AuthHandler.Login)
+		auth.POST("/sign-up/:provider", wrapOgenHandler(ogenServer))
 		auth.GET("/callback/:provider", app.AuthHandler.Callback)
 		auth.POST("/callback/:provider", app.AuthHandler.Callback) // For PKCE flow
 		auth.POST("/refresh", app.AuthHandler.RefreshToken)
@@ -460,4 +482,6 @@ func SetupRoutes(router *gin.Engine, app *wire.App) {
 			"path":  c.Request.URL.Path,
 		})
 	})
+
+	return nil
 }
