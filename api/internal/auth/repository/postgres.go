@@ -127,7 +127,7 @@ func (r *postgresRepository) GetAllActiveSessions(ctx context.Context) ([]*domai
 func (r *postgresRepository) ListUserSessions(ctx context.Context, userID string) ([]*domain.Session, error) {
 	var sessions []*domain.Session
 	if err := r.db.WithContext(ctx).
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND revoked = ? AND expires_at > ?", userID, false, time.Now()).
 		Order("created_at DESC").
 		Find(&sessions).Error; err != nil {
 		return nil, fmt.Errorf("failed to list user sessions: %w", err)

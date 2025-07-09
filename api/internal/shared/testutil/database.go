@@ -18,7 +18,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	postgrescontainer "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -28,6 +28,21 @@ import (
 
 	"github.com/hexabase/hexabase-ai/api/internal/shared/config"
 	internalRedis "github.com/hexabase/hexabase-ai/api/internal/shared/redis"
+)
+
+var ErrNotPostgresContainer = errors.New("found a container but it is not a postgres container")
+
+const (
+	postgresImage         = "postgres:15-alpine"
+	postgresUser          = "testuser"
+	postgresPassword      = "testpass"
+	defaultPostgresDB     = "postgres"
+	templateDBNameDefault = "template_testdb"
+	migrationsPath        = "file://../../shared/db/migrations"
+	waitLogOccurrence     = 2
+	waitStartupTimeout    = 30 * time.Second
+	randomSuffixLength    = 8
+	maxTestNameLength     = 20
 )
 
 // TestDatabase provides test database infrastructure
@@ -43,7 +58,19 @@ var (
 	testDB      *TestDatabase
 	setupOnce   sync.Once
 	keepAliveDB *sql.DB
+
+	// postgresContainerName is initialized with a random suffix to ensure it's unique per test run
+	postgresContainerName = fmt.Sprintf("postgres-hexabase-test-%s", generateRandomHexString(6))
 )
+
+// generateRandomHexString generates a random hex string of a given length
+func generateRandomHexString(length int) string {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("failed to generate random string for container name: %w", err))
+	}
+	return hex.EncodeToString(b)
+}
 
 // SetupTestDatabase initializes the test database infrastructure
 // This should be called in TestMain
@@ -54,11 +81,11 @@ func SetupTestDatabase(m *testing.M) int {
 
 	setupOnce.Do(func() {
 		testDB = &TestDatabase{
-			TemplateDBName: "template_testdb",
+			TemplateDBName: templateDBNameDefault,
 		}
 
-		// Get a test container (reuse or create new)
-		pgContainer, connStr, err := getTestContainer(ctx)
+		// Get a test container by creating a new one with a unique name for this test run.
+		pgContainer, connStr, err := createNewPostgresContainer(ctx)
 		if err != nil {
 			setupErr = fmt.Errorf("failed to get test container: %w", err)
 			return
@@ -111,46 +138,25 @@ func SetupTestDatabase(m *testing.M) int {
 	return code
 }
 
-// getTestContainer finds a reusable test container or creates a new one.
-func getTestContainer(ctx context.Context) (*postgrescontainer.PostgresContainer, string, error) {
-	// First, try to find a running container to reuse
-	existingContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Name: "postgres-hexabase-test",
-		},
-		Started: true, // Only find started containers
-	})
-	if err == nil {
-		pgContainer, ok := existingContainer.(*postgrescontainer.PostgresContainer)
-		if ok {
-			connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-			if err != nil {
-				return nil, "", fmt.Errorf("failed to get connection string from reused container: %w", err)
-			}
-
-			slog.Info("Reusing existing PostgreSQL container")
-
-			return pgContainer, connStr, nil
-		}
-	}
-
-	// If no reusable container is found, create a new one
+// createNewPostgresContainer creates a new postgres container instance.
+// It uses a unique container name for each test run to avoid conflicts.
+func createNewPostgresContainer(ctx context.Context) (*postgrescontainer.PostgresContainer, string, error) {
 	pgContainer, err := postgrescontainer.Run(ctx,
-		"postgres:15-alpine",
+		postgresImage,
+		postgrescontainer.WithUsername(postgresUser),
+		postgrescontainer.WithPassword(postgresPassword),
+		postgrescontainer.WithDatabase(defaultPostgresDB),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).                  //nolint:mnd
-				WithStartupTimeout(30*time.Second), //nolint:mnd
+				WithOccurrence(waitLogOccurrence).
+				WithStartupTimeout(waitStartupTimeout),
 		),
 		testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
-				Name: "postgres-hexabase-test",
+				Name: postgresContainerName,
 			},
 			Reuse: true,
 		}),
-		postgrescontainer.WithDatabase("postgres"),
-		postgrescontainer.WithUsername("testuser"),
-		postgrescontainer.WithPassword("testpass"),
 	)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to start PostgreSQL container: %w", err)
@@ -158,10 +164,13 @@ func getTestContainer(ctx context.Context) (*postgrescontainer.PostgresContainer
 
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
+		// Attempt to terminate the container we just created
+		//nolint:contextcheck
+		_ = pgContainer.Terminate(context.Background())
 		return nil, "", fmt.Errorf("failed to get connection string from new container: %w", err)
 	}
 
-	slog.Info("Started new PostgreSQL container")
+	slog.Info("Started new PostgreSQL container", "name", postgresContainerName)
 
 	return pgContainer, connStr, nil
 }
@@ -201,7 +210,13 @@ func createTemplateDatabase(ctx context.Context, connStr, templateDBName string)
 	// Create template database
 	_, err = db.ExecContext(ctx, "CREATE DATABASE "+templateDBName)
 	if err != nil {
-		return fmt.Errorf("failed to create template database: %w", err)
+		// If it's a duplicate database error, it's okay, another process created it.
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "42P04" { // 42P04 is duplicate_database
+			slog.Info("Template database already exists, proceeding.")
+		} else {
+			return fmt.Errorf("failed to create template database: %w", err)
+		}
 	}
 
 	// Connect to template database
@@ -224,7 +239,7 @@ func createTemplateDatabase(ctx context.Context, connStr, templateDBName string)
 	}
 
 	migrator, err := migrate.NewWithDatabaseInstance(
-		"file://../../shared/db/migrations",
+		migrationsPath,
 		"postgres", driver)
 	if err != nil {
 		return fmt.Errorf("failed to create migrator: %w", err)
@@ -244,7 +259,7 @@ func generateTestDBName(t *testing.T) string {
 	t.Helper()
 
 	// Generate random suffix
-	randomBytes := make([]byte, 8) //nolint:mnd
+	randomBytes := make([]byte, randomSuffixLength)
 	_, err := rand.Read(randomBytes)
 	require.NoError(t, err)
 
@@ -256,7 +271,6 @@ func generateTestDBName(t *testing.T) string {
 	cleanTestName = strings.ToLower(cleanTestName)
 
 	// Truncate to avoid PostgreSQL's 63 character limit
-	const maxTestNameLength = 20
 	if len(cleanTestName) > maxTestNameLength {
 		cleanTestName = cleanTestName[:maxTestNameLength]
 	}
@@ -429,21 +443,8 @@ func WithTestTransaction(t *testing.T, fn func(db *gorm.DB, redisClient *interna
 		tx.Rollback()
 	})
 
-	// Reset miniredis for this test
-	testDB.Miniredis.FlushAll()
-
-	// Create Redis client for this test
-	redisConfig := &config.RedisConfig{
-		Host: testDB.Miniredis.Host(),
-		Port: testDB.Miniredis.Port(),
-		DB:   0,
-	}
-
-	redisClient, err := internalRedis.NewClient(
-		redisConfig,
-		slog.Default(),
-	)
-	require.NoError(t, err)
+	// Create Redis client
+	redisClient := createTestRedisClient(t)
 
 	// Execute the test function
 	fn(tx, redisClient)
