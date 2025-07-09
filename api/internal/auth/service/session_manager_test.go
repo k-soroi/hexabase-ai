@@ -38,7 +38,10 @@ func TestSessionManager_CreateSession_UnderLimit(t *testing.T) {
 		// For this test, we assume the service embeds or provides access to the session manager.
 		// A better approach would be to have sessionManager returned from setup, but for now we work with what we have.
 		// Let's assume we can get it from the service structure or we create it here for the test.
-		repo := repository.NewCompositeRepository(repository.NewPostgresRepository(db), repository.NewRedisAuthRepository(redisClient), repository.NewTokenHashRepository())
+		repo := repository.NewCompositeRepository(
+			repository.NewPostgresRepository(db),
+			repository.NewRedisAuthRepository(redisClient),
+			repository.NewTokenHashRepository())
 		sessionLimiterRepo := repository.NewSessionLimiterRepository(redisClient)
 		sessionManager := service.NewSessionManager(repo, sessionLimiterRepo)
 
@@ -70,7 +73,10 @@ func TestSessionManager_CreateSession_AtLimit_ReturnsError(t *testing.T) {
 	newSessionID := "session-new"
 
 	withTestDB(t, func(db *gorm.DB, redisClient *internalRedis.Client) {
-		repo := repository.NewCompositeRepository(repository.NewPostgresRepository(db), repository.NewRedisAuthRepository(redisClient), repository.NewTokenHashRepository())
+		repo := repository.NewCompositeRepository(
+			repository.NewPostgresRepository(db),
+			repository.NewRedisAuthRepository(redisClient),
+			repository.NewTokenHashRepository())
 		sessionLimiterRepo := repository.NewSessionLimiterRepository(redisClient)
 		sessionManager := service.NewSessionManager(repo, sessionLimiterRepo)
 
@@ -107,7 +113,10 @@ func TestSessionManager_DeleteSession(t *testing.T) {
 	sessionID := "session-to-remove"
 
 	withTestDB(t, func(db *gorm.DB, redisClient *internalRedis.Client) {
-		repo := repository.NewCompositeRepository(repository.NewPostgresRepository(db), repository.NewRedisAuthRepository(redisClient), repository.NewTokenHashRepository())
+		repo := repository.NewCompositeRepository(
+			repository.NewPostgresRepository(db),
+			repository.NewRedisAuthRepository(redisClient),
+			repository.NewTokenHashRepository())
 		sessionLimiterRepo := repository.NewSessionLimiterRepository(redisClient)
 		sessionManager := service.NewSessionManager(repo, sessionLimiterRepo)
 
@@ -138,7 +147,10 @@ func TestSessionManager_GetActiveSessionCount(t *testing.T) {
 	userID := testUserID
 
 	withTestDB(t, func(db *gorm.DB, redisClient *internalRedis.Client) {
-		repo := repository.NewCompositeRepository(repository.NewPostgresRepository(db), repository.NewRedisAuthRepository(redisClient), repository.NewTokenHashRepository())
+		repo := repository.NewCompositeRepository(
+			repository.NewPostgresRepository(db),
+			repository.NewRedisAuthRepository(redisClient),
+			repository.NewTokenHashRepository())
 		sessionLimiterRepo := repository.NewSessionLimiterRepository(redisClient)
 		sessionManager := service.NewSessionManager(repo, sessionLimiterRepo)
 
@@ -168,10 +180,15 @@ func TestSessionManager_CompleteSessionLifecycle(t *testing.T) {
 	withTestDB(t, func(db *gorm.DB, redisClient *internalRedis.Client) {
 		// Test complete session lifecycle with PostgreSQL + Redis
 		_, oauthRepo, _ := setupTestServiceWithDB(t, db, redisClient)
-		stubRepo := oauthRepo.(*stubOAuthRepository)
+		stubRepo, ok := oauthRepo.(*stubOAuthRepository)
+		require.True(t, ok, "failed to cast oauthRepo to stub")
+
 		user := stubRepo.userInfo
 
-		repo := repository.NewCompositeRepository(repository.NewPostgresRepository(db), repository.NewRedisAuthRepository(redisClient), repository.NewTokenHashRepository())
+		repo := repository.NewCompositeRepository(
+			repository.NewPostgresRepository(db),
+			repository.NewRedisAuthRepository(redisClient),
+			repository.NewTokenHashRepository())
 		sessionLimiterRepo := repository.NewSessionLimiterRepository(redisClient)
 		sessionManager := service.NewSessionManager(repo, sessionLimiterRepo)
 
@@ -229,7 +246,7 @@ func TestSessionManager_CompleteSessionLifecycle(t *testing.T) {
 	})
 }
 
-//nolint:paralleltest,funlen // Transaction-based test with comprehensive integration scenarios
+//nolint:paralleltest // Transaction-based test with comprehensive integration scenarios
 func TestSessionManager_SessionLimitEnforcement(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
@@ -239,10 +256,15 @@ func TestSessionManager_SessionLimitEnforcement(t *testing.T) {
 
 	withTestDB(t, func(db *gorm.DB, redisClient *internalRedis.Client) {
 		_, oauthRepo, _ := setupTestServiceWithDB(t, db, redisClient)
-		stubRepo := oauthRepo.(*stubOAuthRepository)
+		stubRepo, ok := oauthRepo.(*stubOAuthRepository)
+		require.True(t, ok, "failed to cast oauthRepo to stub")
+
 		user := stubRepo.userInfo
 
-		repo := repository.NewCompositeRepository(repository.NewPostgresRepository(db), repository.NewRedisAuthRepository(redisClient), repository.NewTokenHashRepository())
+		repo := repository.NewCompositeRepository(
+			repository.NewPostgresRepository(db),
+			repository.NewRedisAuthRepository(redisClient),
+			repository.NewTokenHashRepository())
 		sessionLimiterRepo := repository.NewSessionLimiterRepository(redisClient)
 		sessionManager := service.NewSessionManager(repo, sessionLimiterRepo)
 
@@ -280,7 +302,7 @@ func TestSessionManager_SessionLimitEnforcement(t *testing.T) {
 		}
 
 		// Try to create a 4th session
-		err = sessionManager.CreateSession(ctx, userID, fmt.Sprintf("session-limit-4-%s", uuid.New().String()))
+		err = sessionManager.CreateSession(ctx, userID, "session-limit-4-"+uuid.New().String())
 
 		// Verify it fails with the correct error
 		require.Error(t, err)

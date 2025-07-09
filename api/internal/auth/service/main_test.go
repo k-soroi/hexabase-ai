@@ -37,9 +37,10 @@ func TestMain(m *testing.M) {
 	}
 }
 
-
 // withTestDB creates a new database from template for each test
 func withTestDB(t *testing.T, fn func(db *gorm.DB, redisClient *internalRedis.Client)) {
+	t.Helper()
+
 	testutil.WithTestDB(t, fn)
 }
 
@@ -90,7 +91,7 @@ func setupTestServiceWithDB(
 	// This prevents session limit collisions between concurrent tests.
 	uniqueID := uuid.New().String()
 	userInfo := &domain.UserInfo{
-		ID:       fmt.Sprintf("google-%s", uniqueID),
+		ID:       "google-" + uniqueID,
 		Email:    fmt.Sprintf("test-%s@example.com", uniqueID),
 		Name:     "Test User",
 		Provider: "google",
@@ -148,6 +149,7 @@ func newStubOAuthRepository(userInfo *domain.UserInfo) domain.OAuthRepository {
 			Provider: "google",
 		}
 	}
+
 	return &stubOAuthRepository{userInfo: userInfo}
 }
 

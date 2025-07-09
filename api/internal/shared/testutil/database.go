@@ -51,6 +51,7 @@ func SetupTestDatabase(m *testing.M) int {
 	ctx := context.Background()
 
 	var setupErr error
+
 	setupOnce.Do(func() {
 		testDB = &TestDatabase{
 			TemplateDBName: "template_testdb",
@@ -62,6 +63,7 @@ func SetupTestDatabase(m *testing.M) int {
 			setupErr = fmt.Errorf("failed to get test container: %w", err)
 			return
 		}
+
 		testDB.Container = pgContainer
 		testDB.ConnString = connStr
 
@@ -88,6 +90,7 @@ func SetupTestDatabase(m *testing.M) int {
 	if err != nil {
 		panic(fmt.Sprintf("failed to start miniredis: %v", err))
 	}
+
 	testDB.Miniredis = mr
 
 	// Run tests
@@ -100,7 +103,7 @@ func SetupTestDatabase(m *testing.M) int {
 
 	// Close the keep-alive connection
 	if keepAliveDB != nil {
-		keepAliveDB.Close()
+		_ = keepAliveDB.Close()
 	}
 
 	// Note: We don't terminate the container here to allow reuse
@@ -124,7 +127,9 @@ func getTestContainer(ctx context.Context) (*postgrescontainer.PostgresContainer
 			if err != nil {
 				return nil, "", fmt.Errorf("failed to get connection string from reused container: %w", err)
 			}
+
 			slog.Info("Reusing existing PostgreSQL container")
+
 			return pgContainer, connStr, nil
 		}
 	}
@@ -134,8 +139,8 @@ func getTestContainer(ctx context.Context) (*postgrescontainer.PostgresContainer
 		"postgres:15-alpine",
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(30*time.Second),
+				WithOccurrence(2).                  //nolint:mnd
+				WithStartupTimeout(30*time.Second), //nolint:mnd
 		),
 		testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
@@ -157,6 +162,7 @@ func getTestContainer(ctx context.Context) (*postgrescontainer.PostgresContainer
 	}
 
 	slog.Info("Started new PostgreSQL container")
+
 	return pgContainer, connStr, nil
 }
 
@@ -184,13 +190,16 @@ func createTemplateDatabase(ctx context.Context, connStr, templateDBName string)
 	if err != nil {
 		return fmt.Errorf("failed to connect to postgres: %w", err)
 	}
-	defer db.Close()
+
+	defer func() {
+		_ = db.Close()
+	}()
 
 	// Drop template database if exists
-	_, _ = db.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", templateDBName))
+	_, _ = db.ExecContext(ctx, "DROP DATABASE IF EXISTS "+templateDBName)
 
 	// Create template database
-	_, err = db.Exec(fmt.Sprintf("CREATE DATABASE %s", templateDBName))
+	_, err = db.ExecContext(ctx, "CREATE DATABASE "+templateDBName)
 	if err != nil {
 		return fmt.Errorf("failed to create template database: %w", err)
 	}
@@ -198,11 +207,15 @@ func createTemplateDatabase(ctx context.Context, connStr, templateDBName string)
 	// Connect to template database
 	// Parse connection string to replace database name
 	templateConnStr := strings.Replace(connStr, "dbname=postgres", "dbname="+templateDBName, 1)
+
 	templateDB, err := sql.Open("postgres", templateConnStr)
 	if err != nil {
 		return fmt.Errorf("failed to connect to template database: %w", err)
 	}
-	defer templateDB.Close()
+
+	defer func() {
+		_ = templateDB.Close()
+	}()
 
 	// Apply migrations to template database
 	driver, err := postgres.WithInstance(templateDB, &postgres.Config{})
@@ -222,7 +235,136 @@ func createTemplateDatabase(ctx context.Context, connStr, templateDBName string)
 	}
 
 	slog.Info("Template database created with migrations")
+
 	return nil
+}
+
+// generateTestDBName generates a unique database name for the test
+func generateTestDBName(t *testing.T) string {
+	t.Helper()
+
+	// Generate random suffix
+	randomBytes := make([]byte, 8) //nolint:mnd
+	_, err := rand.Read(randomBytes)
+	require.NoError(t, err)
+
+	randomHex := hex.EncodeToString(randomBytes)
+
+	// Clean test name
+	cleanTestName := strings.ReplaceAll(t.Name(), "/", "_")
+	cleanTestName = strings.ReplaceAll(cleanTestName, " ", "_")
+	cleanTestName = strings.ToLower(cleanTestName)
+
+	// Truncate to avoid PostgreSQL's 63 character limit
+	const maxTestNameLength = 20
+	if len(cleanTestName) > maxTestNameLength {
+		cleanTestName = cleanTestName[:maxTestNameLength]
+	}
+
+	return fmt.Sprintf("test_%s_%s", cleanTestName, randomHex)
+}
+
+// createTestDatabase creates a new test database from template
+func createTestDatabase(ctx context.Context, t *testing.T, dbName string) *sql.DB {
+	t.Helper()
+
+	adminDB, err := sql.Open("postgres", testDB.ConnString)
+	require.NoError(t, err)
+
+	_, err = adminDB.ExecContext(ctx,
+		fmt.Sprintf("CREATE DATABASE %s WITH TEMPLATE %s", dbName, testDB.TemplateDBName))
+	require.NoError(t, err)
+
+	return adminDB
+}
+
+// setupTestDatabaseCleanup registers cleanup functions for the test database
+func setupTestDatabaseCleanup(t *testing.T, adminDB *sql.DB, dbName string) {
+	t.Helper()
+
+	t.Cleanup(func() {
+		// Close the admin connection after all test cleanup is done
+		defer func() {
+			_ = adminDB.Close()
+		}()
+
+		// Create a new connection for cleanup to avoid "database is closed" error
+		cleanupDB, err := sql.Open("postgres", testDB.ConnString)
+		if err != nil {
+			t.Logf("Failed to open connection for cleanup: %v", err)
+			return
+		}
+
+		defer func() {
+			_ = cleanupDB.Close()
+		}()
+
+		// Disallow new connections
+		_, err = cleanupDB.ExecContext(
+			context.Background(),
+			fmt.Sprintf("REVOKE CONNECT ON DATABASE %s FROM public", dbName))
+		if err != nil {
+			t.Logf("Failed to revoke connections on test database %s: %v", dbName, err)
+		}
+
+		// Terminate all connections to the test database
+		_, err = cleanupDB.ExecContext(context.Background(), fmt.Sprintf(`
+			SELECT pg_terminate_backend(pid)
+			FROM pg_stat_activity
+			WHERE datname = '%s' AND pid <> pg_backend_pid()`, dbName))
+		if err != nil {
+			t.Logf("Failed to terminate backends for test database %s: %v", dbName, err)
+		}
+
+		// Drop the test database
+		_, err = cleanupDB.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+dbName)
+		if err != nil {
+			t.Logf("Failed to drop test database %s: %v", dbName, err)
+		}
+	})
+}
+
+// connectToTestDatabase connects to the test database using GORM
+func connectToTestDatabase(t *testing.T, dbName string) *gorm.DB {
+	t.Helper()
+
+	testDBConnStr := strings.Replace(testDB.ConnString, "dbname=postgres", "dbname="+dbName, 1)
+	gormDB, err := gorm.Open(postgresdriver.Open(testDBConnStr), &gorm.Config{
+		SkipDefaultTransaction: true,
+	})
+	require.NoError(t, err)
+
+	// Close connection when test ends
+	sqlDB, err := gormDB.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = sqlDB.Close()
+	})
+
+	return gormDB
+}
+
+// createTestRedisClient creates a Redis client for testing
+func createTestRedisClient(t *testing.T) *internalRedis.Client {
+	t.Helper()
+
+	// Reset miniredis for this test
+	testDB.Miniredis.FlushAll()
+
+	// Create Redis client for this test
+	redisConfig := &config.RedisConfig{
+		Host: testDB.Miniredis.Host(),
+		Port: testDB.Miniredis.Port(),
+		DB:   0,
+	}
+
+	redisClient, err := internalRedis.NewClient(
+		redisConfig,
+		slog.Default(),
+	)
+	require.NoError(t, err)
+
+	return redisClient
 }
 
 // WithTestDB creates a new database from template for each test
@@ -244,97 +386,19 @@ func WithTestDB(t *testing.T, fn func(db *gorm.DB, redisClient *internalRedis.Cl
 	}
 
 	// Generate unique database name for this test
-	// Use random hex string to ensure uniqueness
-	randomBytes := make([]byte, 8)
-	_, err := rand.Read(randomBytes)
-	require.NoError(t, err)
-	randomHex := hex.EncodeToString(randomBytes)
+	dbName := generateTestDBName(t)
 
-	// Replace special characters in test name
-	cleanTestName := strings.ReplaceAll(t.Name(), "/", "_")
-	cleanTestName = strings.ReplaceAll(cleanTestName, " ", "_")
-	cleanTestName = strings.ToLower(cleanTestName)
-	// Truncate test name to avoid PostgreSQL's 63 character limit
-	if len(cleanTestName) > 20 {
-		cleanTestName = cleanTestName[:20]
-	}
-	dbName := fmt.Sprintf("test_%s_%s", cleanTestName, randomHex)
+	// Create test database
+	adminDB := createTestDatabase(ctx, t, dbName)
 
-	// Connect to postgres database to create test database
-	adminDB, err := sql.Open("postgres", testDB.ConnString)
-	require.NoError(t, err)
-	// defer adminDB.Close() // This might be causing the container to be terminated prematurely
+	// Setup cleanup
+	setupTestDatabaseCleanup(t, adminDB, dbName)
 
-	// Create test database from template
-	_, err = adminDB.ExecContext(ctx,
-		fmt.Sprintf("CREATE DATABASE %s WITH TEMPLATE %s", dbName, testDB.TemplateDBName))
-	require.NoError(t, err)
+	// Connect to test database
+	gormDB := connectToTestDatabase(t, dbName)
 
-	// Cleanup function to drop test database
-	t.Cleanup(func() {
-		// Close the admin connection after all test cleanup is done
-		defer adminDB.Close()
-
-		// Create a new connection for cleanup to avoid "database is closed" error
-		cleanupDB, err := sql.Open("postgres", testDB.ConnString)
-		if err != nil {
-			t.Logf("Failed to open connection for cleanup: %v", err)
-			return
-		}
-		defer cleanupDB.Close()
-
-		// Disallow new connections
-		_, err = cleanupDB.Exec(fmt.Sprintf("REVOKE CONNECT ON DATABASE %s FROM public", dbName))
-		if err != nil {
-			t.Logf("Failed to revoke connections on test database %s: %v", dbName, err)
-		}
-
-		// Terminate all connections to the test database
-		_, err = cleanupDB.Exec(fmt.Sprintf(`
-			SELECT pg_terminate_backend(pid)
-			FROM pg_stat_activity
-			WHERE datname = '%s' AND pid <> pg_backend_pid()`, dbName))
-		if err != nil {
-			t.Logf("Failed to terminate backends for test database %s: %v", dbName, err)
-		}
-
-		// Drop the test database
-		_, err = cleanupDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", dbName))
-		if err != nil {
-			t.Logf("Failed to drop test database %s: %v", dbName, err)
-		}
-	})
-
-	// Connect to test database with GORM
-	// Parse connection string to replace database name
-	testDBConnStr := strings.Replace(testDB.ConnString, "dbname=postgres", "dbname="+dbName, 1)
-	gormDB, err := gorm.Open(postgresdriver.Open(testDBConnStr), &gorm.Config{
-		SkipDefaultTransaction: true,
-	})
-	require.NoError(t, err)
-
-	// Close connection when test ends
-	sqlDB, err := gormDB.DB()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		sqlDB.Close()
-	})
-
-	// Reset miniredis for this test
-	testDB.Miniredis.FlushAll()
-
-	// Create Redis client for this test
-	redisConfig := &config.RedisConfig{
-		Host: testDB.Miniredis.Host(),
-		Port: testDB.Miniredis.Port(),
-		DB:   0,
-	}
-
-	redisClient, err := internalRedis.NewClient(
-		redisConfig,
-		slog.Default(),
-	)
-	require.NoError(t, err)
+	// Create Redis client
+	redisClient := createTestRedisClient(t)
 
 	// Execute the test function
 	fn(gormDB, redisClient)
@@ -415,4 +479,3 @@ func CleanupRedis() {
 		testDB.Miniredis.FlushAll()
 	}
 }
-

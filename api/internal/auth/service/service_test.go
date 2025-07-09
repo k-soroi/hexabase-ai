@@ -89,7 +89,9 @@ func TestService_HandleCallback(t *testing.T) { //nolint:paralleltest // Transac
 
 		// Cast the OAuth repository to its stub type to get the user info
 		// This user info will be used to verify the claims in the token.
-		stubOAuthRepo := oauthRepo.(*stubOAuthRepository)
+		stubOAuthRepo, ok := oauthRepo.(*stubOAuthRepository)
+		require.True(t, ok, "failed to cast oauthRepo to stub")
+
 		expectedUser := stubOAuthRepo.userInfo
 
 		// Now test the callback with the valid state
@@ -161,7 +163,9 @@ func TestService_RefreshToken_RotationAndLookup( //nolint:funlen,paralleltest //
 		assert.NotEmpty(t, state)
 
 		// Cast the OAuth repository to its stub type to get the user info
-		stubOAuthRepo := oauthRepo.(*stubOAuthRepository)
+		stubOAuthRepo, ok := oauthRepo.(*stubOAuthRepository)
+		require.True(t, ok, "failed to cast oauthRepo to stub")
+
 		expectedUser := stubOAuthRepo.userInfo
 
 		// Simulate successful OAuth callback
@@ -176,10 +180,12 @@ func TestService_RefreshToken_RotationAndLookup( //nolint:funlen,paralleltest //
 
 		// Get the created user and session from database
 		var user domain.User
+
 		err = db.Where("external_id = ?", expectedUser.ID).First(&user).Error
 		require.NoError(t, err)
 
 		var initialSession domain.Session
+
 		err = db.Where("user_id = ?", user.ID).First(&initialSession).Error
 		require.NoError(t, err)
 
@@ -221,9 +227,10 @@ func TestService_RefreshToken_RotationAndLookup( //nolint:funlen,paralleltest //
 
 		// Verify old session was deleted
 		var oldSession domain.Session
+
 		err = db.Where("id = ?", initialSession.ID).First(&oldSession).Error
-		assert.Error(t, err, "Old session should be deleted after token refresh")
-		assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+		require.Error(t, err, "Old session should be deleted after token refresh")
+		require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
 		// Verify that the new access token contains the correct (new) SessionID
 		claims, err := svc.ValidateAccessToken(ctx, response.AccessToken)
@@ -234,6 +241,7 @@ func TestService_RefreshToken_RotationAndLookup( //nolint:funlen,paralleltest //
 
 		// Get the new session using the SessionID from the token
 		var newSession domain.Session
+
 		err = db.Where("id = ?", claims.SessionID).First(&newSession).Error
 		require.NoError(t, err)
 		assert.Equal(t, user.ID, newSession.UserID)
@@ -276,13 +284,16 @@ func TestService_RevokeSession(t *testing.T) { //nolint:paralleltest // Transact
 		// Get the created user and session from database
 		stubOAuthRepo, ok := oauthRepo.(*stubOAuthRepository)
 		require.True(t, ok, "failed to cast oauthRepo to stub")
+
 		expectedUser := stubOAuthRepo.userInfo
 
 		var user domain.User
+
 		err = db.Where("external_id = ?", expectedUser.ID).First(&user).Error
 		require.NoError(t, err)
 
 		var session domain.Session
+
 		err = db.Where("user_id = ?", user.ID).First(&session).Error
 		require.NoError(t, err)
 
@@ -292,14 +303,13 @@ func TestService_RevokeSession(t *testing.T) { //nolint:paralleltest // Transact
 
 		// Verify session was deleted
 		var deletedSession domain.Session
+
 		err = db.Where("id = ?", session.ID).First(&deletedSession).Error
 		assert.Error(t, err, "Session should be deleted")
 	})
 }
 
 // TestService_RefreshToken_OptimizedLookup_Testcontainers tests refresh token with optimized lookup
-//
-//nolint:funlen,paralleltest // integration test, transaction-based
 func TestService_RefreshToken_OptimizedLookup(t *testing.T) {
 	t.Skip("Skipping this test as it is merged into TestService_RefreshToken_RotationAndLookup")
 }
