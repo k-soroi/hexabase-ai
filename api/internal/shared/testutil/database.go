@@ -55,22 +55,20 @@ type TestDatabase struct {
 
 // Package-level infrastructure
 var (
-	testDB      *TestDatabase
-	setupOnce   sync.Once
-	keepAliveDB *sql.DB
-
-	// postgresContainerName is initialized with a random suffix to ensure it's unique per test run
-	postgresContainerName = "postgres-hexabase-test-" + generateRandomHexString(6) //nolint:mnd
+	testDB                *TestDatabase
+	setupOnce             sync.Once
+	keepAliveDB           *sql.DB
+	postgresContainerName string
 )
 
 // generateRandomHexString generates a random hex string of a given length
-func generateRandomHexString(length int) string {
+func generateRandomHexString(length int) (string, error) {
 	b := make([]byte, length)
 	if _, err := rand.Read(b); err != nil {
-		panic(fmt.Sprintf("failed to generate random string for container name: %v", err))
+		return "", fmt.Errorf("failed to generate random string for container name: %w", err)
 	}
 
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 // SetupTestDatabase initializes the test database infrastructure
@@ -81,6 +79,15 @@ func SetupTestDatabase(m *testing.M) int {
 	var setupErr error
 
 	setupOnce.Do(func() {
+		// Generate unique container name for this test run
+		randomSuffix, err := generateRandomHexString(6) //nolint:mnd
+		if err != nil {
+			setupErr = fmt.Errorf("failed to generate container name: %w", err)
+			return
+		}
+
+		postgresContainerName = "postgres-hexabase-test-" + randomSuffix
+
 		testDB = &TestDatabase{
 			TemplateDBName: templateDBNameDefault,
 		}

@@ -254,7 +254,7 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken, clientIP, user
 	s.logger.Info("[DEBUG] RefreshToken: session expiry check", "session.ExpiresAt", session.ExpiresAt, "now", now, "expired", session.IsExpired())
 	if session.IsExpired() {
 		s.logger.Info("[DEBUG] RefreshToken: session is expired, returning error")
-		return nil, fmt.Errorf("%w", ErrSessionExpired)
+		return nil, ErrSessionExpired
 	}
 
 	// Infrastructure concerns: Get user
