@@ -60,15 +60,16 @@ var (
 	keepAliveDB *sql.DB
 
 	// postgresContainerName is initialized with a random suffix to ensure it's unique per test run
-	postgresContainerName = fmt.Sprintf("postgres-hexabase-test-%s", generateRandomHexString(6))
+	postgresContainerName = "postgres-hexabase-test-" + generateRandomHexString(6) //nolint:mnd
 )
 
 // generateRandomHexString generates a random hex string of a given length
 func generateRandomHexString(length int) string {
 	b := make([]byte, length)
 	if _, err := rand.Read(b); err != nil {
-		panic(fmt.Sprintf("failed to generate random string for container name: %w", err))
+		panic(fmt.Sprintf("failed to generate random string for container name: %v", err))
 	}
+
 	return hex.EncodeToString(b)
 }
 
