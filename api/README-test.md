@@ -216,8 +216,8 @@ Each test function should have its own WithTestDB call to ensure complete isolat
 If containers remain after tests:
 
 1. Check if Ryuk is enabled: `echo $TESTCONTAINERS_RYUK_DISABLED`
-2. Check for postgres containers: `docker ps -a | grep postgres-hexabase-test`
-3. Manually remove container: `docker rm -f postgres-hexabase-test`
+2. Check for postgres containers: `docker ps -a | grep postgres-hexabase-test-`
+3. Manually remove containers: `docker ps -a | grep postgres-hexabase-test- | awk '{print $1}' | xargs docker rm -f`
 4. Disable container reuse for testing: Run with `Reuse: false` option
 
 ### Slow Tests
