@@ -83,7 +83,10 @@ func (m *mockRepositoryForHashTest) GetSession(ctx context.Context, sessionID st
 	return nil, args.Error(1)
 }
 
-func (m *mockRepositoryForHashTest) GetSessionByRefreshTokenSelector(ctx context.Context, selector string) (*domain.Session, error) {
+func (m *mockRepositoryForHashTest) GetSessionByRefreshTokenSelector(
+	ctx context.Context,
+	selector string,
+) (*domain.Session, error) {
 	args := m.Called(ctx, selector)
 	if s, ok := args.Get(0).(*domain.Session); ok {
 		return s, args.Error(1)
@@ -120,7 +123,11 @@ func (m *mockRepositoryForHashTest) DeleteSession(ctx context.Context, sessionID
 	return args.Error(0)
 }
 
-func (m *mockRepositoryForHashTest) DeleteUserSessions(ctx context.Context, userID string, exceptSessionID string) error {
+func (m *mockRepositoryForHashTest) DeleteUserSessions(
+	ctx context.Context,
+	userID string,
+	exceptSessionID string,
+) error {
 	args := m.Called(ctx, userID, exceptSessionID)
 	return args.Error(0)
 }
@@ -149,7 +156,11 @@ func (m *mockRepositoryForHashTest) DeleteAuthState(ctx context.Context, stateVa
 	return args.Error(0)
 }
 
-func (m *mockRepositoryForHashTest) BlacklistRefreshToken(ctx context.Context, token string, expiresAt time.Time) error {
+func (m *mockRepositoryForHashTest) BlacklistRefreshToken(
+	ctx context.Context,
+	token string,
+	expiresAt time.Time,
+) error {
 	args := m.Called(ctx, token, expiresAt)
 	return args.Error(0)
 }
@@ -174,7 +185,10 @@ func (m *mockRepositoryForHashTest) CreateSecurityEvent(ctx context.Context, eve
 	return args.Error(0)
 }
 
-func (m *mockRepositoryForHashTest) ListSecurityEvents(ctx context.Context, filter domain.SecurityLogFilter) ([]*domain.SecurityEvent, error) {
+func (m *mockRepositoryForHashTest) ListSecurityEvents(
+	ctx context.Context,
+	filter domain.SecurityLogFilter,
+) ([]*domain.SecurityEvent, error) {
 	args := m.Called(ctx, filter)
 	if e, ok := args.Get(0).([]*domain.SecurityEvent); ok {
 		return e, args.Error(1)
@@ -197,7 +211,10 @@ func (m *mockRepositoryForHashTest) GetUserOrganizations(ctx context.Context, us
 	return nil, args.Error(1)
 }
 
-func (m *mockRepositoryForHashTest) GetUserWorkspaceGroups(ctx context.Context, userID, workspaceID string) ([]string, error) {
+func (m *mockRepositoryForHashTest) GetUserWorkspaceGroups(
+	ctx context.Context,
+	userID, workspaceID string,
+) ([]string, error) {
 	args := m.Called(ctx, userID, workspaceID)
 	if g, ok := args.Get(0).([]string); ok {
 		return g, args.Error(1)
@@ -218,7 +235,7 @@ func (m *mockRepositoryForHashTest) VerifyToken(plainToken, hashedToken, salt st
 
 // TestService_HashToken_BusinessLogic tests the business validation logic within the hashToken service method.
 // It ensures that input validation is performed correctly before delegating to the repository.
-func TestService_HashToken_BusinessLogic(t *testing.T) {
+func TestService_HashToken_BusinessLogic(t *testing.T) { //nolint:paralleltest,funlen
 	t.Run("Business validation - reject empty token", func(t *testing.T) {
 		mockRepo := &mockRepositoryForHashTest{}
 		s := NewService(mockRepo, nil, nil, nil, nil, nil, slog.Default(), 3600)
@@ -270,7 +287,7 @@ func TestService_HashToken_BusinessLogic(t *testing.T) {
 		mockRepo.AssertCalled(t, "HashToken", validToken)
 	})
 
-	t.Run("Business validation - reject invalid hash from repository", func(t *testing.T) {
+	t.Run("Business validation - reject invalid hash from repository", func(t *testing.T) { //nolint:paralleltest
 		mockRepo := &mockRepositoryForHashTest{}
 		s := NewService(mockRepo, nil, nil, nil, nil, nil, slog.Default(), 3600)
 		svc, ok := s.(*service)
@@ -290,11 +307,12 @@ func TestService_HashToken_BusinessLogic(t *testing.T) {
 		mockRepo.AssertCalled(t, "HashToken", validToken)
 	})
 
-	t.Run("Business validation - reject invalid salt from repository", func(t *testing.T) {
+	t.Run("Business validation - reject invalid salt from repository", func(t *testing.T) { //nolint:paralleltest
 		mockRepo := &mockRepositoryForHashTest{}
 		s := NewService(mockRepo, nil, nil, nil, nil, nil, slog.Default(), 3600)
 		svc, ok := s.(*service)
 		require.True(t, ok)
+
 		validToken := "valid-token-for-salt-test"
 		validHash := "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 		invalidSalt := "short"
@@ -332,7 +350,7 @@ func TestService_VerifyToken_BusinessLogic(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
+			t.Run(tc.name, func(t *testing.T) { //nolint:paralleltest
 				isValid := svc.verifyToken(tc.plainToken, tc.hashedToken, tc.salt)
 
 				assert.False(t, isValid)
@@ -375,7 +393,7 @@ func TestService_VerifyToken_BusinessLogic(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
+			t.Run(tc.name, func(t *testing.T) { //nolint:paralleltest
 				isValid := svc.verifyToken(validToken, tc.hashedToken, tc.salt)
 
 				assert.False(t, isValid)
