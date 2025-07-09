@@ -33,6 +33,11 @@ const (
 	refreshTokenExpectedParts = 2
 )
 
+// Define static errors for the service
+var (
+	ErrSessionExpired = errors.New("session has expired")
+)
+
 // RefreshTokenParts represents the parsed components of a refresh token
 type RefreshTokenParts struct {
 	Selector string
@@ -248,8 +253,8 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken, clientIP, user
 	now := time.Now()
 	s.logger.Info("[DEBUG] RefreshToken: session expiry check", "session.ExpiresAt", session.ExpiresAt, "now", now, "expired", session.IsExpired())
 	if session.IsExpired() {
-			s.logger.Info("[DEBUG] RefreshToken: session is expired, returning error")
-			return nil, fmt.Errorf("session has expired")
+		s.logger.Info("[DEBUG] RefreshToken: session is expired, returning error")
+		return nil, fmt.Errorf("%w", ErrSessionExpired)
 	}
 
 	// Infrastructure concerns: Get user
@@ -296,6 +301,14 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken, clientIP, user
 		s.logger.Error("failed to remove old session from SessionManager", "error", err)
 	}
 
+	// Critical: Delete the old session from the database *before* creating the new one
+	// This prevents race conditions and ensures the old session is invalidated.
+	if err := s.repo.DeleteSession(ctx, oldSessionID); err != nil {
+		s.logger.Error("failed to delete old session", "error", err, "old_session_id", oldSessionID)
+		// If we fail to delete the old session, we must not proceed to create a new one.
+		return nil, fmt.Errorf("failed to securely rotate session: could not delete old session: %w", err)
+	}
+
 	// Infrastructure concerns: Hash new refresh token
 	// Parse new refresh token to extract selector and verifier
 	tokenParts, err := s.parseRefreshToken(tokenPair.RefreshToken)
@@ -311,18 +324,18 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken, clientIP, user
 
 	// Create new session with the new session ID
 	newSession := &domain.Session{
-		ID:           newSessionID,
-		UserID:       session.UserID,
-		RefreshToken: hashedNewToken,
+		ID:                   newSessionID,
+		UserID:               session.UserID,
+		RefreshToken:         hashedNewToken,
 		RefreshTokenSelector: tokenParts.Selector,
-		Salt:         newSalt,
-		DeviceID:     session.DeviceID,
-		IPAddress:    clientIP,  // Update with current IP
-		UserAgent:    userAgent, // Update with current user agent
-		ExpiresAt:    session.ExpiresAt,
-		CreatedAt:    now,
-		LastUsedAt:   now,
-		Revoked:      false,
+		Salt:                 newSalt,
+		DeviceID:             session.DeviceID,
+		IPAddress:            clientIP,  // Update with current IP
+		UserAgent:            userAgent, // Update with current user agent
+		ExpiresAt:            session.ExpiresAt,
+		CreatedAt:            now,
+		LastUsedAt:           now,
+		Revoked:              false,
 	}
 
 	// Add new session to SessionManager
@@ -337,11 +350,6 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken, clientIP, user
 			s.logger.Error("failed to rollback new session from SessionManager", "error", rollbackErr)
 		}
 		return nil, fmt.Errorf("failed to create new session: %w", err)
-	}
-
-	// Delete the old session
-	if err := s.repo.DeleteSession(ctx, oldSessionID); err != nil {
-		s.logger.Error("failed to delete old session", "error", err, "old_session_id", oldSessionID)
 	}
 
 	// Infrastructure concerns: Log security event
@@ -383,9 +391,9 @@ func (s *service) CreateSession(ctx context.Context, sessionID, userID, refreshT
 	session := &domain.Session{
 		ID:                   sessionID, // Use the provided sessionID instead of generating new one
 		UserID:               userID,
-		RefreshToken:         hashedToken, // Store hashed verifier
-		RefreshTokenSelector: tokenParts.Selector,    // Store selector for O(1) lookup
-		Salt:                 salt,        // Store salt
+		RefreshToken:         hashedToken,         // Store hashed verifier
+		RefreshTokenSelector: tokenParts.Selector, // Store selector for O(1) lookup
+		Salt:                 salt,                // Store salt
 		DeviceID:             deviceID,
 		IPAddress:            clientIP,
 		UserAgent:            userAgent,
@@ -575,7 +583,6 @@ func (s *service) ValidateAccessToken(ctx context.Context, tokenString string) (
 
 		return publicKey, nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
@@ -921,6 +928,7 @@ func (s *service) logSecurityEvent(ctx context.Context, userID, eventType, descr
 		UserAgent:   userAgent,
 		Level:       level,
 		CreatedAt:   time.Now(),
+		Metadata:    map[string]interface{}{}, // Initialize with a non-nil empty map
 	}
 
 	if err := s.repo.CreateSecurityEvent(ctx, event); err != nil {
