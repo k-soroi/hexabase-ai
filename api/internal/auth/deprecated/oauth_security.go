@@ -15,13 +15,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	internalAuth "github.com/hexabase/hexabase-ai/api/internal/auth"
 	"github.com/hexabase/hexabase-ai/api/internal/shared/config"
 )
 
 // SecureOAuthClient extends OAuthClient with enhanced security features
 type SecureOAuthClient struct {
-	*internalAuth.OAuthClient
+	*OAuthClient
 	sessionManager *SessionManager
 	jwtManager     *EnhancedJWTManager
 	rateLimiter    *RateLimiter
@@ -68,14 +67,14 @@ type SecureSession struct {
 type EnhancedJWTManager struct {
 	privateKey    interface{}
 	publicKey     interface{}
-	redis         internalAuth.RedisClient
+	redis         RedisClient
 	accessExpiry  time.Duration
 	refreshExpiry time.Duration
 }
 
 // SessionManager handles secure session management
 type SessionManager struct {
-	redis           internalAuth.RedisClient
+	redis           RedisClient
 	maxConcurrent   int
 	sessionTimeout  time.Duration
 	absoluteTimeout time.Duration
@@ -84,14 +83,14 @@ type SessionManager struct {
 
 // RateLimiter implements rate limiting for authentication endpoints
 type RateLimiter struct {
-	redis  internalAuth.RedisClient
+	redis  RedisClient
 	limit  int
 	window time.Duration
 }
 
 // AuditLogger handles security audit logging
 type AuditLogger struct {
-	redis internalAuth.RedisClient
+	redis RedisClient
 }
 
 // AuditEvent represents a security audit event
@@ -111,10 +110,10 @@ type AuditEvent struct {
 // NewSecureOAuthClient creates an OAuth client with enhanced security
 func NewSecureOAuthClient(
 	cfg *config.Config,
-	redis internalAuth.RedisClient,
+	redis RedisClient,
 	privateKey, publicKey interface{},
 ) *SecureOAuthClient {
-	baseClient := internalAuth.NewOAuthClient(cfg, redis)
+	baseClient := NewOAuthClient(cfg, redis)
 
 	return &SecureOAuthClient{
 		OAuthClient:    baseClient,
@@ -126,7 +125,7 @@ func NewSecureOAuthClient(
 }
 
 // NewEnhancedJWTManager creates a JWT manager with security enhancements
-func NewEnhancedJWTManager(privateKey, publicKey interface{}, redis internalAuth.RedisClient) *EnhancedJWTManager {
+func NewEnhancedJWTManager(privateKey, publicKey interface{}, redis RedisClient) *EnhancedJWTManager {
 	return &EnhancedJWTManager{
 		privateKey:    privateKey,
 		publicKey:     publicKey,
@@ -138,7 +137,7 @@ func NewEnhancedJWTManager(privateKey, publicKey interface{}, redis internalAuth
 
 // GenerateTokenPair generates both access and refresh tokens
 func (m *EnhancedJWTManager) GenerateTokenPair(
-	userInfo *internalAuth.UserInfo,
+	userInfo *UserInfo,
 	deviceID, ipAddress string,
 ) (*TokenPair, error) {
 	sessionID := uuid.New().String()
@@ -283,7 +282,7 @@ func (m *EnhancedJWTManager) RefreshTokens(refreshToken, deviceID, ipAddress str
 	}
 
 	// Generate new token pair
-	userInfo := &internalAuth.UserInfo{
+	userInfo := &UserInfo{
 		ID:       claims.UserID,
 		Email:    claims.Email,
 		Provider: claims.Provider,
@@ -323,7 +322,7 @@ func (m *EnhancedJWTManager) generateFingerprint(deviceID, ipAddress string) str
 }
 
 // NewSessionManager creates a new session manager
-func NewSessionManager(redis internalAuth.RedisClient) *SessionManager {
+func NewSessionManager(redis RedisClient) *SessionManager {
 	return &SessionManager{
 		redis:           redis,
 		maxConcurrent:   3,
@@ -335,7 +334,7 @@ func NewSessionManager(redis internalAuth.RedisClient) *SessionManager {
 // CreateSession creates a new secure session
 func (sm *SessionManager) CreateSession(
 	ctx context.Context,
-	userInfo *internalAuth.UserInfo,
+	userInfo *UserInfo,
 	deviceID, ipAddress, userAgent string,
 ) (*SecureSession, error) {
 	sm.mu.Lock()
@@ -465,7 +464,7 @@ func (sm *SessionManager) enforceSessionLimit(ctx context.Context, userID string
 }
 
 // NewRateLimiter creates a new rate limiter
-func NewRateLimiter(redis internalAuth.RedisClient, limit int, window time.Duration) *RateLimiter {
+func NewRateLimiter(redis RedisClient, limit int, window time.Duration) *RateLimiter {
 	return &RateLimiter{
 		redis:  redis,
 		limit:  limit,
@@ -498,7 +497,7 @@ func (rl *RateLimiter) Allow(ctx context.Context, identifier, action string) (bo
 }
 
 // NewAuditLogger creates a new audit logger
-func NewAuditLogger(redis internalAuth.RedisClient) *AuditLogger {
+func NewAuditLogger(redis RedisClient) *AuditLogger {
 	return &AuditLogger{redis: redis}
 }
 

@@ -1,4 +1,4 @@
-package auth
+package deprecated
 
 import (
 	"context"
