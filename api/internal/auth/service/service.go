@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -32,6 +33,11 @@ const (
 	refreshTokenExpectedParts = 2
 )
 
+// Define static errors for the service
+var (
+	ErrSessionExpired = errors.New("session has expired")
+)
+
 // RefreshTokenParts represents the parsed components of a refresh token
 type RefreshTokenParts struct {
 	Selector string
@@ -44,6 +50,7 @@ type service struct {
 	keyRepo            domain.KeyRepository
 	tokenManager       *internalAuth.TokenManager
 	tokenDomainService domain.TokenDomainService
+	sessionManager     domain.SessionManager
 	logger             *slog.Logger
 	defaultTokenExpiry int // Default token expiry in seconds when claims don't have expiry info
 }
@@ -55,6 +62,7 @@ func NewService(
 	keyRepo domain.KeyRepository,
 	tokenManager *internalAuth.TokenManager,
 	tokenDomainService domain.TokenDomainService,
+	sessionManager domain.SessionManager,
 	logger *slog.Logger,
 	defaultTokenExpiry int,
 ) domain.Service {
@@ -64,6 +72,7 @@ func NewService(
 		keyRepo:            keyRepo,
 		tokenManager:       tokenManager,
 		tokenDomainService: tokenDomainService,
+		sessionManager:     sessionManager,
 		logger:             logger,
 		defaultTokenExpiry: defaultTokenExpiry,
 	}
@@ -116,7 +125,10 @@ func (s *service) HandleCallback(ctx context.Context, req *domain.CallbackReques
 	// Get auth state once and perform all validations
 	authState, err := s.repo.GetAuthState(ctx, req.State)
 	if err != nil {
-		return nil, fmt.Errorf("auth state not found: %w", err)
+		if errors.Is(err, domain.ErrAuthStateNotFound) {
+			return nil, fmt.Errorf("auth state not found or expired: %w", err)
+		}
+		return nil, fmt.Errorf("failed to get auth state: %w", err)
 	}
 
 	// Verify state
@@ -157,25 +169,32 @@ func (s *service) HandleCallback(ctx context.Context, req *domain.CallbackReques
 	// Find or create user
 	user, err := s.repo.GetUserByExternalID(ctx, userInfo.ID, authState.Provider)
 	if err != nil {
-		// Create new user
-		user = &domain.User{
-			ID:          uuid.New().String(),
-			ExternalID:  userInfo.ID,
-			Provider:    authState.Provider,
-			Email:       userInfo.Email,
-			DisplayName: userInfo.Name,
-			AvatarURL:   userInfo.Picture,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
-			LastLoginAt: time.Now(),
-		}
+		// Check if it's a "user not found" error
+		if errors.Is(err, domain.ErrUserNotFound) {
+			// Create new user
+			now := time.Now()
+			user = &domain.User{
+				ID:          uuid.New().String(),
+				ExternalID:  userInfo.ID,
+				Provider:    authState.Provider,
+				Email:       userInfo.Email,
+				DisplayName: userInfo.Name,
+				AvatarURL:   userInfo.Picture,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+				LastLoginAt: now,
+			}
 
-		if err := s.repo.CreateUser(ctx, user); err != nil {
-			return nil, fmt.Errorf("failed to create user: %w", err)
-		}
+			if err := s.repo.CreateUser(ctx, user); err != nil {
+				return nil, fmt.Errorf("failed to create user: %w", err)
+			}
 
-		// Log security event
-		s.logSecurityEvent(ctx, user.ID, "user_created", "New user created via OAuth", clientIP, userAgent, "info")
+			// Log security event
+			s.logSecurityEvent(ctx, user.ID, "user_created", "New user created via OAuth", clientIP, userAgent, "info")
+		} else {
+			// Other errors (database errors, etc.)
+			return nil, fmt.Errorf("failed to get user info: %w", err)
+		}
 	} else {
 		// Update last login
 		if err := s.repo.UpdateLastLogin(ctx, user.ID); err != nil {
@@ -234,8 +253,8 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken, clientIP, user
 	now := time.Now()
 	s.logger.Info("[DEBUG] RefreshToken: session expiry check", "session.ExpiresAt", session.ExpiresAt, "now", now, "expired", session.IsExpired())
 	if session.IsExpired() {
-			s.logger.Info("[DEBUG] RefreshToken: session is expired, returning error")
-			return nil, fmt.Errorf("session has expired")
+		s.logger.Info("[DEBUG] RefreshToken: session is expired, returning error")
+		return nil, ErrSessionExpired
 	}
 
 	// Infrastructure concerns: Get user
@@ -244,11 +263,20 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken, clientIP, user
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 
-	// Business logic: Apply domain rules through domain service
+	// Store old session ID before creating new one
+	oldSessionID := session.ID
+
+	// Generate new session ID to invalidate old access tokens
+	newSessionID := uuid.New().String()
+
+	// Business logic: Create new claims without modifying the original session
 	newClaims, err := s.tokenDomainService.RefreshToken(ctx, session, user)
 	if err != nil {
 		return nil, fmt.Errorf("refresh validation failed: %w", err)
 	}
+
+	// Update claims with new session ID after domain logic validation
+	newClaims.SessionID = newSessionID
 
 	// Infrastructure concerns: Generate token pair using new claims
 	tokenPair, err := s.generateTokenPairFromClaims(ctx, newClaims)
@@ -261,7 +289,27 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken, clientIP, user
 		s.logger.Error("failed to blacklist old refresh token", "error", err)
 	}
 
-	// Infrastructure concerns: Hash and update session with new refresh token
+	// Block the old session ID to invalidate all access tokens associated with it
+	// This is a critical security operation - must not proceed if blocking fails
+	if err := s.repo.BlockSession(ctx, oldSessionID, session.ExpiresAt); err != nil {
+		return nil, fmt.Errorf("failed to block old session: %w", err)
+	}
+
+	// Remove old session from SessionManager
+	// This is less critical - if it fails, the session will still be blocked and will expire from Redis
+	if err := s.sessionManager.DeleteSession(ctx, session.UserID, oldSessionID); err != nil {
+		s.logger.Error("failed to remove old session from SessionManager", "error", err)
+	}
+
+	// Critical: Delete the old session from the database *before* creating the new one
+	// This prevents race conditions and ensures the old session is invalidated.
+	if err := s.repo.DeleteSession(ctx, oldSessionID); err != nil {
+		s.logger.Error("failed to delete old session", "error", err, "old_session_id", oldSessionID)
+		// If we fail to delete the old session, we must not proceed to create a new one.
+		return nil, fmt.Errorf("failed to securely rotate session: could not delete old session: %w", err)
+	}
+
+	// Infrastructure concerns: Hash new refresh token
 	// Parse new refresh token to extract selector and verifier
 	tokenParts, err := s.parseRefreshToken(tokenPair.RefreshToken)
 	if err != nil {
@@ -274,16 +322,38 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken, clientIP, user
 		return nil, fmt.Errorf("failed to hash new refresh token: %w", err)
 	}
 
-	session.RefreshToken = hashedNewToken
-	session.RefreshTokenSelector = tokenParts.Selector
-	session.Salt = newSalt
-	session.LastUsedAt = time.Now()
-	if err := s.repo.UpdateSession(ctx, session); err != nil {
-		return nil, fmt.Errorf("failed to update session: %w", err)
+	// Create new session with the new session ID
+	newSession := &domain.Session{
+		ID:                   newSessionID,
+		UserID:               session.UserID,
+		RefreshToken:         hashedNewToken,
+		RefreshTokenSelector: tokenParts.Selector,
+		Salt:                 newSalt,
+		DeviceID:             session.DeviceID,
+		IPAddress:            clientIP,  // Update with current IP
+		UserAgent:            userAgent, // Update with current user agent
+		ExpiresAt:            session.ExpiresAt,
+		CreatedAt:            now,
+		LastUsedAt:           now,
+		Revoked:              false,
+	}
+
+	// Add new session to SessionManager
+	if err := s.sessionManager.CreateSession(ctx, session.UserID, newSessionID); err != nil {
+		return nil, fmt.Errorf("failed to add new session to SessionManager: %w", err)
+	}
+
+	// Create the new session
+	if err := s.repo.CreateSession(ctx, newSession); err != nil {
+		// Rollback SessionManager changes if database creation fails
+		if rollbackErr := s.sessionManager.DeleteSession(ctx, session.UserID, newSessionID); rollbackErr != nil {
+			s.logger.Error("failed to rollback new session from SessionManager", "error", rollbackErr)
+		}
+		return nil, fmt.Errorf("failed to create new session: %w", err)
 	}
 
 	// Infrastructure concerns: Log security event
-	s.logSecurityEvent(ctx, user.ID, "token_refreshed", "Access token refreshed", clientIP, userAgent, "info")
+	s.logSecurityEvent(ctx, user.ID, "token_refreshed", fmt.Sprintf("Access token refreshed, old session %s replaced with %s", oldSessionID, newSessionID), clientIP, userAgent, "info")
 
 	return tokenPair, nil
 }
@@ -307,13 +377,23 @@ func (s *service) CreateSession(ctx context.Context, sessionID, userID, refreshT
 		return nil, fmt.Errorf("failed to hash refresh token: %w", err)
 	}
 
+	// Check concurrent session limit using SessionManager
+	if err := s.sessionManager.CreateSession(ctx, userID, sessionID); err != nil {
+		// Propagate ErrTooManySessions without wrapping
+		if errors.Is(err, domain.ErrTooManySessions) {
+			return nil, err
+		}
+
+		return nil, fmt.Errorf("failed to enforce session limit: %w", err)
+	}
+
 	now := time.Now()
 	session := &domain.Session{
 		ID:                   sessionID, // Use the provided sessionID instead of generating new one
 		UserID:               userID,
-		RefreshToken:         hashedToken, // Store hashed verifier
-		RefreshTokenSelector: tokenParts.Selector,    // Store selector for O(1) lookup
-		Salt:                 salt,        // Store salt
+		RefreshToken:         hashedToken,         // Store hashed verifier
+		RefreshTokenSelector: tokenParts.Selector, // Store selector for O(1) lookup
+		Salt:                 salt,                // Store salt
 		DeviceID:             deviceID,
 		IPAddress:            clientIP,
 		UserAgent:            userAgent,
@@ -324,6 +404,10 @@ func (s *service) CreateSession(ctx context.Context, sessionID, userID, refreshT
 	}
 
 	if err := s.repo.CreateSession(ctx, session); err != nil {
+		// Rollback session from SessionManager if database creation fails
+		if rollbackErr := s.sessionManager.DeleteSession(ctx, userID, sessionID); rollbackErr != nil {
+			s.logger.Error("failed to rollback session from SessionManager", "error", rollbackErr)
+		}
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
@@ -384,6 +468,11 @@ func (s *service) RevokeSession(ctx context.Context, userID, sessionID string) e
 		s.logger.Error("failed to blacklist refresh token", "error", err)
 	}
 
+	// Remove session from SessionManager
+	if err := s.sessionManager.DeleteSession(ctx, userID, sessionID); err != nil {
+		s.logger.Error("failed to remove session from SessionManager", "error", err)
+	}
+
 	// Delete session
 	if err := s.repo.DeleteSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
@@ -407,6 +496,11 @@ func (s *service) RevokeAllSessions(ctx context.Context, userID string, exceptSe
 		if session.ID != exceptSessionID {
 			if err := s.repo.BlacklistRefreshToken(ctx, session.RefreshToken, session.ExpiresAt); err != nil {
 				s.logger.Error("failed to blacklist refresh token", "error", err)
+			}
+
+			// Remove session from SessionManager
+			if err := s.sessionManager.DeleteSession(ctx, userID, session.ID); err != nil {
+				s.logger.Error("failed to remove session from SessionManager", "error", err)
 			}
 		}
 	}
@@ -489,7 +583,6 @@ func (s *service) ValidateAccessToken(ctx context.Context, tokenString string) (
 
 		return publicKey, nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
@@ -756,27 +849,6 @@ func (s *service) GetJWKS(ctx context.Context) ([]byte, error) {
 	return s.keyRepo.GetJWKS()
 }
 
-func (s *service) GetOIDCConfiguration(ctx context.Context) (map[string]interface{}, error) {
-	// Return OIDC discovery document
-	config := map[string]interface{}{
-		"issuer":                                "https://api.hexabase-kaas.io",
-		"authorization_endpoint":                "https://api.hexabase-kaas.io/auth/authorize",
-		"token_endpoint":                        "https://api.hexabase-kaas.io/auth/token",
-		"userinfo_endpoint":                     "https://api.hexabase-kaas.io/auth/userinfo",
-		"jwks_uri":                              "https://api.hexabase-kaas.io/.well-known/jwks.json",
-		"response_types_supported":              []string{"code"},
-		"subject_types_supported":               []string{"public"},
-		"id_token_signing_alg_values_supported": []string{"RS256"},
-		"scopes_supported":                      []string{"openid", "profile", "email"},
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic"},
-		"claims_supported": []string{
-			"sub", "email", "name", "picture", "provider", "org_ids",
-		},
-	}
-
-	return config, nil
-}
-
 func (s *service) verifyAuthState(authState *domain.AuthState, clientIP string) error {
 	// Check expiry
 	if authState.ExpiresAt.Before(time.Now()) {
@@ -856,6 +928,7 @@ func (s *service) logSecurityEvent(ctx context.Context, userID, eventType, descr
 		UserAgent:   userAgent,
 		Level:       level,
 		CreatedAt:   time.Now(),
+		Metadata:    map[string]interface{}{}, // Initialize with a non-nil empty map
 	}
 
 	if err := s.repo.CreateSecurityEvent(ctx, event); err != nil {

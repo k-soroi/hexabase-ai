@@ -89,3 +89,8 @@ func (c *Client) GetDel(ctx context.Context, key string) (string, error) {
 	}
 	return val, err
 }
+
+// GetClient returns the underlying Redis client for advanced operations
+func (c *Client) GetClient() *redis.Client {
+	return c.client
+}

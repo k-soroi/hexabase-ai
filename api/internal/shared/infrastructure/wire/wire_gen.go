@@ -109,8 +109,10 @@ func InitializeApp(cfg *config.Config, db *gorm.DB, k8sClient kubernetes.Interfa
 		return nil, err
 	}
 	tokenDomainService := ProvideTokenDomainService()
+	sessionLimiterRepository := repository2.NewSessionLimiterRepository(client)
+	sessionManager := service2.NewSessionManager(repository14, sessionLimiterRepository)
 	int2 := ProvideDefaultTokenExpiry()
-	service14 := service2.NewService(repository14, oAuthRepository, keyRepository, tokenManager, tokenDomainService, logger, int2)
+	service14 := service2.NewService(repository14, oAuthRepository, keyRepository, tokenManager, tokenDomainService, sessionManager, logger, int2)
 	handlerHandler := handler2.NewHandler(service14, logger)
 	repository15 := repository3.NewPostgresRepository(db)
 	proxmoxRepository := ProvideBackupProxmoxRepository(cfg)
@@ -196,9 +198,9 @@ func InitializeApp(cfg *config.Config, db *gorm.DB, k8sClient kubernetes.Interfa
 var ApplicationSet = wire.NewSet(repository.NewPostgresRepository, repository.NewKubernetesRepository, service.NewService, handler.NewApplicationHandler)
 
 var AuthSet = wire.NewSet(
-	ProvideRedisClient, repository2.NewPostgresRepository, repository2.NewRedisAuthRepository, repository2.NewTokenHashRepository, repository2.NewCompositeRepository, repository2.NewOAuthRepository, repository2.NewKeyRepository, ProvideTokenManager,
+	ProvideRedisClient, repository2.NewPostgresRepository, repository2.NewRedisAuthRepository, repository2.NewTokenHashRepository, repository2.NewCompositeRepository, repository2.NewOAuthRepository, repository2.NewKeyRepository, repository2.NewSessionLimiterRepository, ProvideTokenManager,
 	ProvideTokenDomainService,
-	ProvideDefaultTokenExpiry, service2.NewService, handler2.NewHandler,
+	ProvideDefaultTokenExpiry, service2.NewSessionManager, service2.NewService, handler2.NewHandler,
 )
 
 var OrganizationSet = wire.NewSet(repository9.NewPostgresRepository, repository9.NewAuthRepositoryAdapter, repository9.NewBillingRepositoryAdapter, service8.NewService, handler8.NewHandler)

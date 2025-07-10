@@ -337,32 +337,7 @@ Response:
 }
 ```
 
-## OIDC Discovery
-
-Hexabase KaaS provides OIDC discovery endpoints for integration:
-
-### Discovery Document
-
-```http
-GET /.well-known/openid-configuration
-```
-
-Response:
-```json
-{
-  "issuer": "https://api.hexabase.ai",
-  "authorization_endpoint": "https://api.hexabase.ai/auth/authorize",
-  "token_endpoint": "https://api.hexabase.ai/auth/token",
-  "userinfo_endpoint": "https://api.hexabase.ai/auth/userinfo",
-  "jwks_uri": "https://api.hexabase.ai/.well-known/jwks.json",
-  "response_types_supported": ["code", "token", "id_token"],
-  "subject_types_supported": ["public"],
-  "id_token_signing_alg_values_supported": ["RS256"],
-  "scopes_supported": ["openid", "email", "profile"],
-  "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
-  "claims_supported": ["sub", "email", "name", "picture", "organizations"]
-}
-```
+## Token Verification
 
 ### JWKS Endpoint
 

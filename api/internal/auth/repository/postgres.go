@@ -35,7 +35,7 @@ func (r *postgresRepository) GetUser(ctx context.Context, userID string) (*domai
 	var user domain.User
 	if err := r.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("user not found")
+			return nil, fmt.Errorf("failed to get user %s: %w", userID, domain.ErrUserNotFound)
 		}
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
@@ -48,7 +48,7 @@ func (r *postgresRepository) GetUserByExternalID(ctx context.Context, externalID
 		Where("external_id = ? AND provider = ?", externalID, provider).
 		First(&user).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("user not found")
+			return nil, fmt.Errorf("failed to get user by external ID %s (provider: %s): %w", externalID, provider, domain.ErrUserNotFound)
 		}
 		return nil, fmt.Errorf("failed to get user by external ID: %w", err)
 	}
@@ -59,7 +59,7 @@ func (r *postgresRepository) GetUserByEmail(ctx context.Context, email string) (
 	var user domain.User
 	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("user not found")
+			return nil, fmt.Errorf("failed to get user by email %s: %w", email, domain.ErrUserNotFound)
 		}
 		return nil, fmt.Errorf("failed to get user by email: %w", err)
 	}
@@ -98,7 +98,7 @@ func (r *postgresRepository) GetSession(ctx context.Context, sessionID string) (
 	var session domain.Session
 	if err := r.db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("session not found")
+			return nil, fmt.Errorf("failed to get session %s: %w", sessionID, domain.ErrSessionNotFound)
 		}
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
@@ -127,7 +127,7 @@ func (r *postgresRepository) GetAllActiveSessions(ctx context.Context) ([]*domai
 func (r *postgresRepository) ListUserSessions(ctx context.Context, userID string) ([]*domain.Session, error) {
 	var sessions []*domain.Session
 	if err := r.db.WithContext(ctx).
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND revoked = ? AND expires_at > ?", userID, false, time.Now()).
 		Order("created_at DESC").
 		Find(&sessions).Error; err != nil {
 		return nil, fmt.Errorf("failed to list user sessions: %w", err)
@@ -190,7 +190,7 @@ func (r *postgresRepository) GetAuthState(ctx context.Context, stateValue string
 		Where("state = ? AND expires_at > ?", stateValue, time.Now()).
 		First(&state).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("auth state not found or expired")
+			return nil, fmt.Errorf("failed to get auth state %s: %w", stateValue, domain.ErrAuthStateNotFound)
 		}
 		return nil, fmt.Errorf("failed to get auth state: %w", err)
 	}

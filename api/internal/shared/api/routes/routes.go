@@ -72,8 +72,7 @@ func SetupRoutes(router *gin.Engine, app *wire.App) {
 		auth.GET("/security-logs", app.AuthHandler.AuthMiddleware(), app.AuthHandler.GetSecurityLogs)
 	}
 
-	// OIDC Discovery endpoints (public)
-	router.GET("/.well-known/openid-configuration", app.AuthHandler.OIDCDiscovery)
+	// JWKS endpoint (public)
 	router.GET("/.well-known/jwks.json", app.AuthHandler.JWKS)
 
 	// Protected routes (require authentication)
@@ -388,7 +387,7 @@ func SetupRoutes(router *gin.Engine, app *wire.App) {
 		pipelineRoutes.POST("/:pipelineId/retry", app.CICDHandler.RetryPipeline)
 		pipelineRoutes.GET("/:pipelineId/logs", app.CICDHandler.GetPipelineLogs)
 		pipelineRoutes.GET("/:pipelineId/logs/stream", app.CICDHandler.StreamPipelineLogs)
-		
+
 		// Templates
 		pipelineRoutes.GET("/templates", app.CICDHandler.ListTemplates)
 		pipelineRoutes.GET("/templates/:templateId", app.CICDHandler.GetTemplate)
@@ -431,7 +430,7 @@ func SetupRoutes(router *gin.Engine, app *wire.App) {
 			// Overview and insights
 			workspaceInternal.GET("/overview", app.InternalHandler.GetWorkspaceOverview)
 			workspaceInternal.POST("/insights", app.InternalHandler.GetAIInsights)
-			
+
 			// Operations
 			workspaceInternal.POST("/operations", app.InternalHandler.ExecuteWorkspaceOperation)
 			workspaceInternal.GET("/nodes", app.InternalHandler.GetNodes)

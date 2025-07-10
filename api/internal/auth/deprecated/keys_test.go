@@ -1,17 +1,17 @@
-package auth_test
+package deprecated_test
 
 import (
 	"encoding/json"
 	"os"
 	"testing"
 
-	"github.com/hexabase/hexabase-ai/api/internal/auth"
+	"github.com/hexabase/hexabase-ai/api/internal/auth/deprecated"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestKeyManager_NewKeyManager(t *testing.T) {
 	// Test with no existing keys
-	km, err := auth.NewKeyManager()
+	km, err := deprecated.NewKeyManager()
 	assert.NoError(t, err)
 	assert.NotNil(t, km)
 	assert.NotNil(t, km.GetPrivateKey())
@@ -19,7 +19,7 @@ func TestKeyManager_NewKeyManager(t *testing.T) {
 }
 
 func TestKeyManager_GetJWKS(t *testing.T) {
-	km, err := auth.NewKeyManager()
+	km, err := deprecated.NewKeyManager()
 	assert.NoError(t, err)
 
 	jwks, err := km.GetJWKS()
@@ -37,7 +37,7 @@ func TestKeyManager_GetJWKS(t *testing.T) {
 }
 
 func TestKeyManager_GetJWKSJSON(t *testing.T) {
-	km, err := auth.NewKeyManager()
+	km, err := deprecated.NewKeyManager()
 	assert.NoError(t, err)
 
 	jwksJSON, err := km.GetJWKSJSON()
@@ -45,14 +45,14 @@ func TestKeyManager_GetJWKSJSON(t *testing.T) {
 	assert.NotEmpty(t, jwksJSON)
 
 	// Verify it's valid JSON
-	var jwks auth.JWKS
+	var jwks deprecated.JWKS
 	err = json.Unmarshal(jwksJSON, &jwks)
 	assert.NoError(t, err)
 	assert.Len(t, jwks.Keys, 1)
 }
 
 func TestKeyManager_GetPublicKeyPEM(t *testing.T) {
-	km, err := auth.NewKeyManager()
+	km, err := deprecated.NewKeyManager()
 	assert.NoError(t, err)
 
 	pem, err := km.GetPublicKeyPEM()
@@ -70,7 +70,7 @@ func TestKeyManager_Persistence(t *testing.T) {
 	defer os.Remove(tempFile)
 
 	// Create first key manager (should generate and save key)
-	km1, err := auth.NewKeyManager()
+	km1, err := deprecated.NewKeyManager()
 	assert.NoError(t, err)
 	key1PEM, err := km1.GetPublicKeyPEM()
 	assert.NoError(t, err)
@@ -80,7 +80,7 @@ func TestKeyManager_Persistence(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create second key manager (should load existing key)
-	km2, err := auth.NewKeyManager()
+	km2, err := deprecated.NewKeyManager()
 	assert.NoError(t, err)
 	key2PEM, err := km2.GetPublicKeyPEM()
 	assert.NoError(t, err)

@@ -19,6 +19,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **ALWAYS** follow the TDD cycle: Red → Green → Refactor
 - See examples in `/api/internal/repository/application/cronjob_test.go` for proper TDD approach
 
+### 3. MANDATORY: Code Quality Checks for Go Development
+
+- **ALWAYS** run `make lint-api` after completing Go code changes in the `/api` directory
+- **TIMING**: Run lint checks at these critical points:
+  - After implementing a feature (after all tests pass)
+  - Before marking any task as completed
+  - Before creating any pull request
+  - After resolving merge conflicts
+- **NEVER** consider Go code work complete without passing lint checks
+- **FIX** all linting issues before proceeding to next tasks
+
 ## Project Overview
 
 Hexabase AI is a multi-tenant Kubernetes as a Service platform built on K3s and vCluster. The project provides a complete PaaS solution with support for various application types including stateless apps, stateful services, CronJobs, and serverless functions.

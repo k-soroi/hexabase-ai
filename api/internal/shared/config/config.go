@@ -57,9 +57,8 @@ type NATSConfig struct {
 
 // AuthConfig holds authentication configuration
 type AuthConfig struct {
-	JWTSecret      string            `mapstructure:"jwt_secret"`
-	JWTExpiration  int               `mapstructure:"jwt_expiration"`
-	OIDCIssuer     string            `mapstructure:"oidc_issuer"`
+	JWTSecret         string                   `mapstructure:"jwt_secret"`
+	JWTExpiration     int                      `mapstructure:"jwt_expiration"`
 	ExternalProviders map[string]OAuthProvider `mapstructure:"external_providers"`
 }
 
@@ -94,15 +93,15 @@ type K8sConfig struct {
 
 // MonitoringConfig holds monitoring and metrics configuration
 type MonitoringConfig struct {
-	PrometheusURL       string `mapstructure:"prometheus_url"`
-	MetricsPort         string `mapstructure:"metrics_port"`
-	MetricsPath         string `mapstructure:"metrics_path"`
-	ScrapeInterval      string `mapstructure:"scrape_interval"`
-	RetentionPeriod     string `mapstructure:"retention_period"`
-	EnableMetrics       bool   `mapstructure:"enable_metrics"`
-	EnableAlerts        bool   `mapstructure:"enable_alerts"`
-	AlertmanagerURL     string `mapstructure:"alertmanager_url"`
-	DefaultAlertRules   []string `mapstructure:"default_alert_rules"`
+	PrometheusURL     string   `mapstructure:"prometheus_url"`
+	MetricsPort       string   `mapstructure:"metrics_port"`
+	MetricsPath       string   `mapstructure:"metrics_path"`
+	ScrapeInterval    string   `mapstructure:"scrape_interval"`
+	RetentionPeriod   string   `mapstructure:"retention_period"`
+	EnableMetrics     bool     `mapstructure:"enable_metrics"`
+	EnableAlerts      bool     `mapstructure:"enable_alerts"`
+	AlertmanagerURL   string   `mapstructure:"alertmanager_url"`
+	DefaultAlertRules []string `mapstructure:"default_alert_rules"`
 }
 
 // AIOpsConfig holds configuration for the AIOps service
@@ -122,7 +121,7 @@ type ClickHouseConfig struct {
 func Load(configPath string) (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
-	
+
 	if configPath != "" {
 		viper.SetConfigFile(configPath)
 	} else {
@@ -184,7 +183,6 @@ func setDefaults() {
 
 	// Auth defaults
 	viper.SetDefault("auth.jwt_expiration", 3600) // 1 hour
-	viper.SetDefault("auth.oidc_issuer", "https://api.hexabase.ai")
 
 	// AIOps defaults
 	viper.SetDefault("aiops.url", "http://ai-ops-service.ai-ops.svc.cluster.local:8000")

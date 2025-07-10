@@ -33,7 +33,6 @@ type Service interface {
 
 	// OIDC operations
 	GetJWKS(ctx context.Context) ([]byte, error)
-	GetOIDCConfiguration(ctx context.Context) (map[string]interface{}, error)
 
 	// Auth state operations
 	StoreAuthState(ctx context.Context, state *AuthState) error

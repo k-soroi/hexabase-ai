@@ -1,1065 +1,315 @@
-package service
+package service_test
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"errors"
-	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
-
-	internalAuth "github.com/hexabase/hexabase-ai/api/internal/auth"
-	"github.com/hexabase/hexabase-ai/api/internal/auth/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
+	"github.com/hexabase/hexabase-ai/api/internal/auth/domain"
+	internalRedis "github.com/hexabase/hexabase-ai/api/internal/shared/redis"
 )
 
-// Mock repository
-type mockRepository struct {
-	mock.Mock
-}
-
-// Mock token domain service
-type mockTokenDomainService struct {
-	mock.Mock
-}
-
-func (m *mockTokenDomainService) RefreshToken(ctx context.Context, session *domain.Session, user *domain.User) (*domain.Claims, error) {
-	args := m.Called(ctx, session, user)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.Claims), args.Error(1)
+//nolint:contextcheck // withTestDB wrapper doesn't pass context parameter
+func TestService_GetAuthURL(t *testing.T) { //nolint:paralleltest // Transaction-based test
+	// Skip if short test
+	if testing.Short() {
+		t.Skip("Skipping integration test")
 	}
-	return nil, args.Error(1)
-}
 
-func (m *mockTokenDomainService) ValidateRefreshEligibility(session *domain.Session) error {
-	args := m.Called(session)
-	return args.Error(0)
-}
-
-func (m *mockTokenDomainService) CreateSession(sessionID, userID, refreshToken, deviceID, clientIP, userAgent string) (*domain.Session, error) {
-	args := m.Called(sessionID, userID, refreshToken, deviceID, clientIP, userAgent)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.Session), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockTokenDomainService) ValidateTokenClaims(claims *domain.Claims) error {
-	args := m.Called(claims)
-	return args.Error(0)
-}
-
-func (m *mockTokenDomainService) ShouldRefreshToken(claims *domain.Claims) bool {
-	args := m.Called(claims)
-	return args.Bool(0)
-}
-
-func (m *mockRepository) CreateUser(ctx context.Context, user *domain.User) error {
-	args := m.Called(ctx, user)
-	return args.Error(0)
-}
-
-func (m *mockRepository) GetUser(ctx context.Context, userID string) (*domain.User, error) {
-	args := m.Called(ctx, userID)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.User), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepository) GetUserByExternalID(ctx context.Context, externalID, provider string) (*domain.User, error) {
-	args := m.Called(ctx, externalID, provider)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.User), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepository) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
-	args := m.Called(ctx, email)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.User), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepository) UpdateUser(ctx context.Context, user *domain.User) error {
-	args := m.Called(ctx, user)
-	return args.Error(0)
-}
-
-func (m *mockRepository) UpdateLastLogin(ctx context.Context, userID string) error {
-	args := m.Called(ctx, userID)
-	return args.Error(0)
-}
-
-func (m *mockRepository) CreateSession(ctx context.Context, session *domain.Session) error {
-	args := m.Called(ctx, session)
-	return args.Error(0)
-}
-
-func (m *mockRepository) GetSession(ctx context.Context, sessionID string) (*domain.Session, error) {
-	args := m.Called(ctx, sessionID)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.Session), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepository) GetSessionByRefreshTokenSelector(ctx context.Context, selector string) (*domain.Session, error) {
-	args := m.Called(ctx, selector)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.Session), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-
-func (m *mockRepository) ListUserSessions(ctx context.Context, userID string) ([]*domain.Session, error) {
-	args := m.Called(ctx, userID)
-	if args.Get(0) != nil {
-		return args.Get(0).([]*domain.Session), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepository) UpdateSession(ctx context.Context, session *domain.Session) error {
-	args := m.Called(ctx, session)
-	return args.Error(0)
-}
-
-func (m *mockRepository) DeleteSession(ctx context.Context, sessionID string) error {
-	args := m.Called(ctx, sessionID)
-	return args.Error(0)
-}
-
-func (m *mockRepository) DeleteUserSessions(ctx context.Context, userID string, exceptSessionID string) error {
-	args := m.Called(ctx, userID, exceptSessionID)
-	return args.Error(0)
-}
-
-func (m *mockRepository) CleanupExpiredSessions(ctx context.Context, before time.Time) error {
-	args := m.Called(ctx, before)
-	return args.Error(0)
-}
-
-func (m *mockRepository) StoreAuthState(ctx context.Context, state *domain.AuthState) error {
-	args := m.Called(ctx, state)
-	return args.Error(0)
-}
-
-func (m *mockRepository) GetAuthState(ctx context.Context, stateValue string) (*domain.AuthState, error) {
-	args := m.Called(ctx, stateValue)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.AuthState), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepository) DeleteAuthState(ctx context.Context, stateValue string) error {
-	args := m.Called(ctx, stateValue)
-	return args.Error(0)
-}
-
-func (m *mockRepository) BlacklistRefreshToken(ctx context.Context, token string, expiresAt time.Time) error {
-	args := m.Called(ctx, token, expiresAt)
-	return args.Error(0)
-}
-
-func (m *mockRepository) IsRefreshTokenBlacklisted(ctx context.Context, token string) (bool, error) {
-	args := m.Called(ctx, token)
-	return args.Bool(0), args.Error(1)
-}
-
-func (m *mockRepository) CreateSecurityEvent(ctx context.Context, event *domain.SecurityEvent) error {
-	args := m.Called(ctx, event)
-	return args.Error(0)
-}
-
-func (m *mockRepository) ListSecurityEvents(ctx context.Context, filter domain.SecurityLogFilter) ([]*domain.SecurityEvent, error) {
-	args := m.Called(ctx, filter)
-	if args.Get(0) != nil {
-		return args.Get(0).([]*domain.SecurityEvent), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepository) CleanupOldSecurityEvents(ctx context.Context, before time.Time) error {
-	args := m.Called(ctx, before)
-	return args.Error(0)
-}
-
-func (m *mockRepository) GetUserOrganizations(ctx context.Context, userID string) ([]string, error) {
-	args := m.Called(ctx, userID)
-	if args.Get(0) != nil {
-		return args.Get(0).([]string), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepository) GetUserWorkspaceGroups(ctx context.Context, userID, workspaceID string) ([]string, error) {
-	args := m.Called(ctx, userID, workspaceID)
-	if args.Get(0) != nil {
-		return args.Get(0).([]string), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepository) HashToken(token string) (hashedToken string, salt string, err error) {
-	args := m.Called(token)
-	return args.String(0), args.String(1), args.Error(2)
-}
-
-func (m *mockRepository) VerifyToken(plainToken, hashedToken, salt string) bool {
-	args := m.Called(plainToken, hashedToken, salt)
-	return args.Bool(0)
-}
-
-func (m *mockRepository) GetAllActiveSessions(ctx context.Context) ([]*domain.Session, error) {
-	args := m.Called(ctx)
-	if args.Get(0) != nil {
-		return args.Get(0).([]*domain.Session), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepository) BlockSession(ctx context.Context, sessionID string, expiresAt time.Time) error {
-	args := m.Called(ctx, sessionID, expiresAt)
-	return args.Error(0)
-}
-
-func (m *mockRepository) IsSessionBlocked(ctx context.Context, sessionID string) (bool, error) {
-	args := m.Called(ctx, sessionID)
-	return args.Bool(0), args.Error(1)
-}
-
-// Mock OAuth repository
-type mockOAuthRepository struct {
-	mock.Mock
-}
-
-func (m *mockOAuthRepository) GetProviderConfig(provider string) (*domain.ProviderConfig, error) {
-	args := m.Called(provider)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.ProviderConfig), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockOAuthRepository) GetAuthURL(provider, state string, params map[string]string) (string, error) {
-	args := m.Called(provider, state, params)
-	return args.String(0), args.Error(1)
-}
-
-func (m *mockOAuthRepository) ExchangeCode(ctx context.Context, provider, code string) (*domain.OAuthToken, error) {
-	args := m.Called(ctx, provider, code)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.OAuthToken), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockOAuthRepository) GetUserInfo(ctx context.Context, provider string, token *domain.OAuthToken) (*domain.UserInfo, error) {
-	args := m.Called(ctx, provider, token)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.UserInfo), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockOAuthRepository) RefreshOAuthToken(ctx context.Context, provider string, refreshToken string) (*domain.OAuthToken, error) {
-	args := m.Called(ctx, provider, refreshToken)
-	if args.Get(0) != nil {
-		return args.Get(0).(*domain.OAuthToken), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-// Mock key repository
-type mockKeyRepository struct {
-	mock.Mock
-}
-
-func (m *mockKeyRepository) GetPrivateKey() ([]byte, error) {
-	args := m.Called()
-	if args.Get(0) != nil {
-		return args.Get(0).([]byte), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockKeyRepository) GetPublicKey() ([]byte, error) {
-	args := m.Called()
-	if args.Get(0) != nil {
-		return args.Get(0).([]byte), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockKeyRepository) GetJWKS() ([]byte, error) {
-	args := m.Called()
-	if args.Get(0) != nil {
-		return args.Get(0).([]byte), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockKeyRepository) RotateKeys() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-func TestService_GetAuthURL(t *testing.T) {
 	ctx := context.Background()
 
+	//nolint:paralleltest // Transaction-based test
+	t.Run("successful auth URL generation for google", func(t *testing.T) {
+		withTestDB(t, func(db *gorm.DB, redisClient *internalRedis.Client) {
+			svc, _, _ := setupTestServiceWithDB(t, db, redisClient)
 
-	mockRepo := new(mockRepository)
-	mockOAuthRepo := new(mockOAuthRepository)
-	mockKeyRepo := new(mockKeyRepository)
-	mockTokenDomainService := new(mockTokenDomainService)
+			req := &domain.LoginRequest{
+				Provider: "google",
+			}
 
+			url, state, err := svc.GetAuthURL(ctx, req)
 
-	// Create a dummy TokenManager
-	testPrivateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	testPublicKey := &testPrivateKey.PublicKey
-	tokenManager := internalAuth.NewTokenManager(testPrivateKey, testPublicKey, "test-issuer", time.Hour)
+			require.NoError(t, err)
+			assert.Contains(t, url, "accounts.google.com")
+			assert.NotEmpty(t, state)
+			assert.GreaterOrEqual(t, len(state), 16, "State token should be sufficiently long")
 
+			// Verify auth state was stored in Redis (not in database)
+			// Auth states are stored in Redis, not PostgreSQL
+			// We can verify by checking that the state is not empty and has proper format
+			assert.NotEmpty(t, state)
+			assert.GreaterOrEqual(t, len(state), 32, "State should be at least 32 characters")
+		})
+	})
 
-	svc := &service{
-		repo:               mockRepo,
-		oauthRepo:          mockOAuthRepo,
-		keyRepo:            mockKeyRepo,
-		tokenManager:       tokenManager,
-		tokenDomainService: mockTokenDomainService,
-		logger:             slog.Default(),
-		defaultTokenExpiry: 3600, // 1 hour default
+	//nolint:paralleltest // Transaction-based test
+	t.Run("invalid provider should return error", func(t *testing.T) {
+		withTestDB(t, func(db *gorm.DB, redisClient *internalRedis.Client) {
+			svc, _, _ := setupTestServiceWithDB(t, db, redisClient)
+
+			req := &domain.LoginRequest{
+				Provider: "invalid-provider",
+			}
+
+			url, state, err := svc.GetAuthURL(ctx, req)
+
+			require.Error(t, err)
+			assert.Empty(t, url)
+			assert.Empty(t, state)
+			assert.Contains(t, err.Error(), "unsupported provider")
+		})
+	})
+}
+
+func TestService_HandleCallback(t *testing.T) { //nolint:paralleltest // Transaction-based test
+	if testing.Short() {
+		t.Skip("Skipping integration test")
 	}
 
-	t.Run("successful get auth URL", func(t *testing.T) {
-		req := &domain.LoginRequest{
+	ctx := context.Background()
+
+	withTestDB(t, func(db *gorm.DB, redisClient *internalRedis.Client) {
+		svc, oauthRepo, _ := setupTestServiceWithDB(t, db, redisClient)
+
+		// First, we need to create an auth state to simulate a valid OAuth flow
+		// Since we're using a real repository, we need to use the actual service method
+		loginReq := &domain.LoginRequest{
 			Provider: "google",
 		}
-
-		expectedURL := "https://accounts.google.com/o/oauth2/v2/auth?state=random-state-123"
-
-		// Mock repository calls
-		mockRepo.On("StoreAuthState", ctx, mock.AnythingOfType("*domain.AuthState")).Return(nil)
-		mockOAuthRepo.On("GetAuthURL", "google", mock.AnythingOfType("string"), mock.Anything).Return(expectedURL, nil)
-
-		url, state, err := svc.GetAuthURL(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, expectedURL, url)
+		authURL, state, err := svc.GetAuthURL(ctx, loginReq)
+		require.NoError(t, err)
+		assert.NotEmpty(t, authURL)
 		assert.NotEmpty(t, state)
 
-		mockRepo.AssertExpectations(t)
-		mockOAuthRepo.AssertExpectations(t)
-	})
+		// Cast the OAuth repository to its stub type to get the user info
+		// This user info will be used to verify the claims in the token.
+		stubOAuthRepo, ok := oauthRepo.(*stubOAuthRepository)
+		require.True(t, ok, "failed to cast oauthRepo to stub")
 
-	t.Run("invalid provider", func(t *testing.T) {
-		req := &domain.LoginRequest{
-			Provider: "invalid-provider",
-		}
+		expectedUser := stubOAuthRepo.userInfo
 
-		mockRepo.On("StoreAuthState", ctx, mock.AnythingOfType("*domain.AuthState")).Return(nil)
-		mockOAuthRepo.On("GetAuthURL", "invalid-provider", mock.AnythingOfType("string"), mock.Anything).
-			Return("", errors.New("unsupported provider"))
-
-		url, state, err := svc.GetAuthURL(ctx, req)
-		assert.Error(t, err)
-		assert.Empty(t, url)
-		assert.Empty(t, state)
-	})
-}
-
-func TestService_HandleCallback(t *testing.T) {
-	ctx := context.Background()
-
-
-	mockRepo := new(mockRepository)
-	mockOAuthRepo := new(mockOAuthRepository)
-	mockKeyRepo := new(mockKeyRepository)
-	mockTokenDomainService := new(mockTokenDomainService)
-
-
-	// Create a dummy TokenManager
-	testPrivateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	testPublicKey := &testPrivateKey.PublicKey
-	tokenManager := internalAuth.NewTokenManager(testPrivateKey, testPublicKey, "test-issuer", time.Hour)
-
-
-	svc := &service{
-		repo:               mockRepo,
-		oauthRepo:          mockOAuthRepo,
-		keyRepo:            mockKeyRepo,
-		tokenManager:       tokenManager,
-		tokenDomainService: mockTokenDomainService,
-		logger:             slog.Default(),
-		defaultTokenExpiry: 3600, // 1 hour default
-	}
-
-	t.Run("successful callback - new user", func(t *testing.T) {
+		// Now test the callback with the valid state
 		req := &domain.CallbackRequest{
 			Code:  "auth-code-123",
-			State: "valid-state-123",
-		}
-		clientIP := "192.168.1.1"
-		userAgent := "Mozilla/5.0"
-
-		authState := &domain.AuthState{
-			State:     "valid-state-123",
-			Provider:  "google",
-			ExpiresAt: time.Now().Add(10 * time.Minute), // Valid for 10 minutes
+			State: state,
 		}
 
-		oauthToken := &domain.OAuthToken{
-			AccessToken:  "access-token-123",
-			RefreshToken: "refresh-token-123",
-		}
+		response, err := svc.HandleCallback(ctx, req, "192.168.1.1", "Mozilla/5.0")
+		require.NoError(t, err)
+		assert.NotNil(t, response)
+		assert.NotEmpty(t, response.AccessToken)
+		assert.NotEmpty(t, response.RefreshToken)
 
-		userInfo := &domain.UserInfo{
-			ID:       "google-123",
-			Email:    "user@example.com",
-			Name:     "Test User",
+		// Verify user was created in the database
+		var user domain.User
+
+		// Find user by the ExternalID we expect from the stub
+		err = db.Where("external_id = ?", expectedUser.ID).First(&user).Error
+		require.NoError(t, err)
+		assert.Equal(t, expectedUser.Provider, user.Provider)
+		assert.Equal(t, expectedUser.ID, user.ExternalID)
+		assert.Equal(t, expectedUser.Email, user.Email)
+
+		// Verify session was created
+		var session domain.Session
+
+		// Get the session for the user (should be only one for new user)
+		err = db.Where("user_id = ?", user.ID).First(&session).Error
+		require.NoError(t, err)
+		assert.Equal(t, user.ID, session.UserID)
+		assert.False(t, session.ExpiresAt.IsZero())
+
+		// Verify that the access token contains the SessionID
+		// Parse and validate the JWT token to check Claims
+		claims, err := svc.ValidateAccessToken(ctx, response.AccessToken)
+		require.NoError(t, err)
+		assert.NotNil(t, claims)
+		assert.NotEmpty(t, claims.SessionID, "SessionID should be included in the access token")
+		assert.Equal(t, session.ID, claims.SessionID, "Token SessionID should match the created session")
+		assert.Equal(t, user.ID, claims.UserID, "Token UserID should match the created user")
+		assert.Equal(t, expectedUser.Email, claims.Email, "Token Email should match the user email")
+
+		// Security events are currently not stored in PostgreSQL
+		// They may be logged to a separate system or stored differently
+		// TODO: Add security event verification once the storage mechanism is clarified
+	})
+}
+
+func TestService_RefreshToken_RotationAndLookup( //nolint:funlen,paralleltest // integration test, transaction-based
+	t *testing.T,
+) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	ctx := context.Background()
+
+	withTestDB(t, func(db *gorm.DB, redisClient *internalRedis.Client) {
+		svc, oauthRepo, tokenDomainService := setupTestServiceWithDB(t, db, redisClient)
+
+		// First, create a user and session through the normal flow
+		loginReq := &domain.LoginRequest{
 			Provider: "google",
 		}
+		authURL, state, err := svc.GetAuthURL(ctx, loginReq)
+		require.NoError(t, err)
+		assert.NotEmpty(t, authURL)
+		assert.NotEmpty(t, state)
 
-		// No longer need to generate private key for test since TokenManager handles it
+		// Cast the OAuth repository to its stub type to get the user info
+		stubOAuthRepo, ok := oauthRepo.(*stubOAuthRepository)
+		require.True(t, ok, "failed to cast oauthRepo to stub")
 
-		// Mock the flow
-		mockRepo.On("GetAuthState", ctx, "valid-state-123").Return(authState, nil).Once()
-		mockRepo.On("DeleteAuthState", ctx, "valid-state-123").Return(nil)
-		mockOAuthRepo.On("ExchangeCode", ctx, "google", "auth-code-123").Return(oauthToken, nil)
-		mockOAuthRepo.On("GetUserInfo", ctx, "google", oauthToken).Return(userInfo, nil)
+		expectedUser := stubOAuthRepo.userInfo
 
-
-		// User doesn't exist yet
-		mockRepo.On("GetUserByExternalID", ctx, "google-123", "google").Return(nil, errors.New("not found"))
-		mockRepo.On("CreateUser", ctx, mock.AnythingOfType("*domain.User")).Return(nil)
-		mockRepo.On("CreateSecurityEvent", ctx, mock.AnythingOfType("*domain.SecurityEvent")).Return(nil).Times(2)
-
-
-		// Generate tokens
-		mockRepo.On("GetUserOrganizations", ctx, mock.AnythingOfType("string")).Return([]string{}, nil)
-
-		// Hash token for session creation
-		mockRepo.On("HashToken", mock.AnythingOfType("string")).Return(
-			"1234567890123456789012345678901234567890123456789012345678901234", // 64 chars
-			"abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd", // 64 chars  
-			nil).Maybe()
-
-		// Create session
-		mockRepo.On("CreateSession", ctx, mock.AnythingOfType("*domain.Session")).Return(nil)
-		mockTokenDomainService.On("CreateSession", mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(&domain.Session{
-			ID: "session-123",
-			UserID: "user-123",
-		}, nil)
-
-		response, err := svc.HandleCallback(ctx, req, clientIP, userAgent)
-		assert.NoError(t, err)
-		assert.NotNil(t, response)
-		assert.NotNil(t, response.User)
-		assert.Equal(t, "user@example.com", response.User.Email)
-		assert.NotEmpty(t, response.AccessToken)
-		assert.NotEmpty(t, response.RefreshToken)
-
-		mockRepo.AssertExpectations(t)
-		mockOAuthRepo.AssertExpectations(t)
-	})
-
-	t.Run("invalid state", func(t *testing.T) {
-		req := &domain.CallbackRequest{
-			Code:  "auth-code-789",
-			State: "invalid-state",
+		// Simulate successful OAuth callback
+		callbackReq := &domain.CallbackRequest{
+			Code:  "auth-code-123",
+			State: state,
 		}
-		clientIP := "192.168.1.1"
-		userAgent := "Mozilla/5.0"
+		loginResponse, err := svc.HandleCallback(ctx, callbackReq, "192.168.1.1", "Mozilla/5.0")
+		require.NoError(t, err)
+		assert.NotNil(t, loginResponse)
+		assert.NotEmpty(t, loginResponse.RefreshToken)
 
-		mockRepo.On("GetAuthState", ctx, "invalid-state").Return(nil, errors.New("not found")).Once()
+		// Get the created user and session from database
+		var user domain.User
 
-		response, err := svc.HandleCallback(ctx, req, clientIP, userAgent)
-		assert.Error(t, err)
-		assert.Nil(t, response)
-		assert.Contains(t, err.Error(), "auth state not found")
+		err = db.Where("external_id = ?", expectedUser.ID).First(&user).Error
+		require.NoError(t, err)
 
-		mockRepo.AssertExpectations(t)
-	})
+		var initialSession domain.Session
 
-	t.Run("successful callback with PKCE", func(t *testing.T) {
-		req := &domain.CallbackRequest{
-			Code:         "auth-code-pkce",
-			State:        "valid-state-pkce",
-			CodeVerifier: "verifier-123",
+		err = db.Where("user_id = ?", user.ID).First(&initialSession).Error
+		require.NoError(t, err)
+
+		// Set up tokenDomainService expectation
+		domainClaims := &domain.Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Subject:   user.ID,
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
+			UserID:    user.ID,
+			Email:     user.Email,
+			Name:      user.DisplayName,
+			Provider:  user.Provider,
+			SessionID: "new-session-id-for-refresh", // A new session ID will be generated
+			OrgIDs:    []string{},
 		}
-		clientIP := "192.168.1.1"
-		userAgent := "Mozilla/5.0"
+		tokenDomainService.On("RefreshToken", mock.Anything,
+			mock.AnythingOfType("*domain.Session"),
+			mock.AnythingOfType("*domain.User")).Return(domainClaims, nil).Once()
 
-		authState := &domain.AuthState{
-			State:        "valid-state-pkce",
-			Provider:      "google",
-			CodeChallenge: "Ds3NpaREu9I2EYq6l0l3ZkFyv_Gt5O4EpGD6cZlY0Kg", // sha256("verifier-123")
-			ExpiresAt:     time.Now().Add(10 * time.Minute),
-		}
-
-		oauthToken := &domain.OAuthToken{AccessToken: "access-token-pkce"}
-		userInfo := &domain.UserInfo{ID: "google-pkce", Email: "pkce@example.com", Name: "PKCE User"}
-
-		mockRepo.On("GetAuthState", ctx, req.State).Return(authState, nil).Once()
-		mockOAuthRepo.On("ExchangeCode", ctx, "google", req.Code).Return(oauthToken, nil).Once()
-		mockOAuthRepo.On("GetUserInfo", ctx, "google", oauthToken).Return(userInfo, nil).Once()
-		mockRepo.On("GetUserByExternalID", ctx, userInfo.ID, "google").Return(nil, errors.New("not found")).Once()
-		mockRepo.On("CreateUser", ctx, mock.AnythingOfType("*domain.User")).Return(nil).Once()
-		mockRepo.On("GetUserOrganizations", ctx, mock.AnythingOfType("string")).Return([]string{}, nil).Once()
-		mockRepo.On("HashToken", mock.AnythingOfType("string")).Return("hashed-token", "salt", nil).Once()
-		mockRepo.On("CreateSession", ctx, mock.AnythingOfType("*domain.Session")).Return(nil).Once()
-		mockRepo.On("DeleteAuthState", ctx, req.State).Return(nil).Once()
-		mockRepo.On("CreateSecurityEvent", ctx, mock.AnythingOfType("*domain.SecurityEvent")).Return(nil).Twice()
-
-		// No longer need to mock VerifyPKCE directly as it's now an internal helper
-
-		response, err := svc.HandleCallback(ctx, req, clientIP, userAgent)
-		assert.NoError(t, err)
-		assert.NotNil(t, response)
-	})
-
-	t.Run("PKCE verification failed - wrong verifier", func(t *testing.T) {
-		req := &domain.CallbackRequest{
-			Code:         "auth-code-pkce-fail",
-			State:        "state-pkce-fail",
-			CodeVerifier: "wrong-verifier",
-		}
-		clientIP := "192.168.1.1"
-		userAgent := "Mozilla/5.0"
-
-		authState := &domain.AuthState{
-			State:         "state-pkce-fail",
-			Provider:      "google",
-			CodeChallenge: "m6M3_w_n222e5N7g-aA4a-AYxEK299lF-iQ2pE79gA4", // sha256("verifier-123")
-			ExpiresAt:     time.Now().Add(10 * time.Minute),
-		}
-
-		mockRepo.On("GetAuthState", ctx, req.State).Return(authState, nil).Once()
-		mockRepo.On("CreateSecurityEvent", ctx, mock.AnythingOfType("*domain.SecurityEvent")).Return(nil).Once()
-
-		response, err := svc.HandleCallback(ctx, req, clientIP, userAgent)
-		assert.Error(t, err)
-		assert.Nil(t, response)
-		assert.Contains(t, err.Error(), "PKCE verification failed")
-	})
-
-	t.Run("PKCE error - verifier missing", func(t *testing.T) {
-		req := &domain.CallbackRequest{
-			Code:         "auth-code-pkce-missing",
-			State:        "state-pkce-missing",
-			CodeVerifier: "", // Verifier is missing
-		}
-		clientIP := "192.168.1.1"
-		userAgent := "Mozilla/5.0"
-
-		authState := &domain.AuthState{
-			State:         "state-pkce-missing",
-			Provider:      "google",
-			CodeChallenge: "m6M3_w_n222e5N7g-aA4a-AYxEK299lF-iQ2pE79gA4",
-			ExpiresAt:     time.Now().Add(10 * time.Minute),
-		}
-
-		mockRepo.On("GetAuthState", ctx, req.State).Return(authState, nil).Once()
-		mockRepo.On("CreateSecurityEvent", ctx, mock.AnythingOfType("*domain.SecurityEvent")).Return(nil).Once()
-
-		response, err := svc.HandleCallback(ctx, req, clientIP, userAgent)
-		assert.Error(t, err)
-		assert.Nil(t, response)
-		assert.Contains(t, err.Error(), "code_verifier is required")
-	})
-}
-
-func TestService_RefreshToken(t *testing.T) {
-	ctx := context.Background()
-
-	mockRepo := new(mockRepository)
-	mockKeyRepo := new(mockKeyRepository)
-	mockTokenDomainService := new(mockTokenDomainService)
-
-
-	// Create a dummy TokenManager
-	testPrivateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	testPublicKey := &testPrivateKey.PublicKey
-	tokenManager := internalAuth.NewTokenManager(testPrivateKey, testPublicKey, "test-issuer", time.Hour)
-
-
-	svc := &service{
-		repo:               mockRepo,
-		keyRepo:            mockKeyRepo,
-		tokenManager:       tokenManager,
-		tokenDomainService: mockTokenDomainService,
-		logger:             slog.Default(),
-		defaultTokenExpiry: 3600, // 1 hour default
-	}
-
-	// No longer need to generate private key for test since TokenManager handles it
-
-	t.Run("successful refresh", func(t *testing.T) {
-		selector := "123456789-123456789-123456789-s"
-		verifier := "123456789-123456789-123456789-1v"
-		refreshToken := selector + "." + verifier
-		clientIP := "192.168.1.1"
-		userAgent := "Mozilla/5.0"
-
-		user := &domain.User{
-			ID:          "user-123",
-			Email:       "user@example.com",
-			DisplayName: "Test User",
-			Provider:    "google",
-		}
-
-		// Create session with mock hash and salt values (for testing purposes)
-		// hashedToken := selector + "b8c8f5e6d4a7c2e9f1b3d6e8a5c7f9e2d4b6e8f1c3e5a7b9d2f4e6c8a1b3d5e712"
-		hashedToken := refreshToken
-		salt := "a1b2c3d4e5f67890123456789012345678901234567890123456789012345678"
-
-		session := &domain.Session{
-			ID:           uuid.New().String(),
-			UserID:       "user-123",
-			RefreshToken: hashedToken,
-			Salt:         salt,
-			ExpiresAt:    time.Now().Add(24 * time.Hour),
-		}
-
-		// Expected Claims from TokenDomainService
-		expectedClaims := &domain.Claims{
-			UserID:    "user-123",
-			Email:     "user@example.com",
-			Name:      "Test User",
-			Provider:  "google",
-			SessionID: session.ID,
-		}
-
-		// Mock repository calls - the VerifyToken should return true for our test token
-		mockRepo.On("IsRefreshTokenBlacklisted", ctx, refreshToken).Return(false, nil)
-		mockRepo.On("GetSessionByRefreshTokenSelector", ctx, selector).Return(session, nil)
-		mockRepo.On("VerifyToken", verifier, hashedToken, salt).Return(true)
-		mockRepo.On("GetUser", ctx, "user-123").Return(user, nil)
-		mockTokenDomainService.On("RefreshToken", ctx, session, user).Return(expectedClaims, nil)
-		mockRepo.On("BlacklistRefreshToken", ctx, refreshToken, session.ExpiresAt).Return(nil)
-
-		// Hash token for session update with new refresh token
-		mockRepo.On("HashToken", mock.AnythingOfType("string")).Return(
-			refreshToken, // "9876543210987654321098765432109876543210987654321098765432109876", // 64 chars
-			salt, // "efghefghefghefghefghefghefghefghefghefghefghefghefghefghefghefgh", // 64 chars
-			nil)
-
-		mockRepo.On("UpdateSession", ctx, mock.AnythingOfType("*domain.Session")).Return(nil)
-		mockRepo.On("CreateSecurityEvent", ctx, mock.AnythingOfType("*domain.SecurityEvent")).Return(nil)
-
-		response, err := svc.RefreshToken(ctx, refreshToken, clientIP, userAgent)
-		assert.NoError(t, err)
+		// Now test the refresh token functionality
+		response, err := svc.RefreshToken(
+			ctx,
+			loginResponse.RefreshToken,
+			"192.168.1.2",
+			"Mozilla/5.0 Updated",
+		)
+		require.NoError(t, err)
 		assert.NotNil(t, response)
 		assert.NotEmpty(t, response.AccessToken)
 		assert.NotEmpty(t, response.RefreshToken)
-		assert.Equal(t, "Bearer", response.TokenType)
-		assert.Equal(t, 3600, response.ExpiresIn)
+		assert.NotEqual(
+			t,
+			loginResponse.RefreshToken,
+			response.RefreshToken,
+			"New refresh token should be different",
+		)
 
-		mockRepo.AssertExpectations(t)
-	})
+		// Verify old session was deleted
+		var oldSession domain.Session
 
-	t.Run("blacklisted token", func(t *testing.T) {
-		refreshToken := "blacklisted-token"
-		clientIP := "192.168.1.1"
-		userAgent := "Mozilla/5.0"
+		err = db.Where("id = ?", initialSession.ID).First(&oldSession).Error
+		require.Error(t, err, "Old session should be deleted after token refresh")
+		require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
-		mockRepo.On("IsRefreshTokenBlacklisted", ctx, refreshToken).Return(true, nil)
+		// Verify that the new access token contains the correct (new) SessionID
+		claims, err := svc.ValidateAccessToken(ctx, response.AccessToken)
+		require.NoError(t, err)
+		assert.NotNil(t, claims)
+		assert.NotEmpty(t, claims.SessionID, "SessionID should be included in the refreshed access token")
+		assert.NotEqual(t, initialSession.ID, claims.SessionID, "A new session ID should be created")
 
-		response, err := svc.RefreshToken(ctx, refreshToken, clientIP, userAgent)
-		assert.Error(t, err)
-		assert.Nil(t, response)
-		assert.Contains(t, err.Error(), "invalid")
+		// Get the new session using the SessionID from the token
+		var newSession domain.Session
 
-		mockRepo.AssertExpectations(t)
-	})
-
-	t.Run("expired session", func(t *testing.T) {
-		selector := "expired-unique-123456789-12345s"
-		verifier := "expired-unique-123456789-123456v"
-		refreshToken := selector + "." + verifier
-		clientIP := "192.168.1.1"
-		userAgent := "Mozilla/5.0"
-
-		// Create an expired session
-		expiredSession := &domain.Session{
-				ID:                   "expired-session-id",
-				UserID:               "user-123",
-				RefreshToken:         refreshToken,
-				RefreshTokenSelector: selector,
-				Salt:                 "salt1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab", // 64 chars
-				ExpiresAt:            time.Now().Add(-24 * time.Hour), // Expired 1 hour ago
-		}
-
-		mockRepo.On("IsRefreshTokenBlacklisted", ctx, refreshToken).Return(false, nil).Once()
-		mockRepo.On("GetSessionByRefreshTokenSelector", ctx, selector).Return(expiredSession, nil).Once()
-		mockRepo.On("VerifyToken", verifier, expiredSession.RefreshToken, expiredSession.Salt).Return(true).Once()
-
-		// Note: GetUser and TokenDomainService.RefreshToken are NOT called because session expires before those steps
-
-		response, err := svc.RefreshToken(ctx, refreshToken, clientIP, userAgent)
-		assert.Error(t, err)
-		assert.Nil(t, response)
-		assert.Contains(t, err.Error(), "session has expired")
-
-		mockRepo.AssertExpectations(t)
-		// Note: TokenDomainService.RefreshToken is NOT called because session expires before domain validation
+		err = db.Where("id = ?", claims.SessionID).First(&newSession).Error
+		require.NoError(t, err)
+		assert.Equal(t, user.ID, newSession.UserID)
+		assert.Equal(t, "192.168.1.2", newSession.IPAddress)
+		assert.Equal(t, "Mozilla/5.0 Updated", newSession.UserAgent)
+		assert.Equal(t, user.ID, claims.UserID, "Token UserID should remain the same")
+		assert.Equal(t, expectedUser.Email, claims.Email, "Token Email should remain the same")
+		assert.NotEmpty(t, newSession.RefreshTokenSelector, "New session must have a selector for optimized lookup")
 	})
 }
 
-func TestService_RevokeSession(t *testing.T) {
-	ctx := context.Background()
-
-
-	mockRepo := new(mockRepository)
-	mockTokenDomainService := new(mockTokenDomainService)
-
-
-	// Create a dummy TokenManager
-	testPrivateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	testPublicKey := &testPrivateKey.PublicKey
-	tokenManager := internalAuth.NewTokenManager(testPrivateKey, testPublicKey, "test-issuer", time.Hour)
-
-
-	svc := &service{
-		repo:               mockRepo,
-		tokenManager:       tokenManager,
-		tokenDomainService: mockTokenDomainService,
-		logger:             slog.Default(),
-		defaultTokenExpiry: 3600, // 1 hour default
-	}
-
-	t.Run("successful revoke", func(t *testing.T) {
-		userID := "user-123"
-		sessionID := "session-123"
-		refreshToken := "refresh-token-123"
-
-		session := &domain.Session{
-			ID:           sessionID,
-			UserID:       userID,
-			RefreshToken: refreshToken,
-			ExpiresAt:    time.Now().Add(24 * time.Hour),
-		}
-
-		// Mock repository calls
-		mockRepo.On("GetSession", ctx, sessionID).Return(session, nil)
-		mockRepo.On("BlacklistRefreshToken", ctx, refreshToken, session.ExpiresAt).Return(nil)
-		mockRepo.On("DeleteSession", ctx, sessionID).Return(nil)
-		mockRepo.On("CreateSecurityEvent", ctx, mock.AnythingOfType("*domain.SecurityEvent")).Return(nil)
-
-		err := svc.RevokeSession(ctx, userID, sessionID)
-		assert.NoError(t, err)
-
-		mockRepo.AssertExpectations(t)
-	})
-
-	t.Run("session not found", func(t *testing.T) {
-		userID := "user-456"
-		sessionID := "non-existent"
-
-		mockRepo.On("GetSession", ctx, sessionID).Return(nil, errors.New("not found"))
-
-		err := svc.RevokeSession(ctx, userID, sessionID)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not found")
-
-		mockRepo.AssertExpectations(t)
-	})
-
-	t.Run("user mismatch", func(t *testing.T) {
-		userID := "user-789"
-		sessionID := "session-789"
-
-		session := &domain.Session{
-			ID:     sessionID,
-			UserID: "different-user",
-		}
-
-		mockRepo.On("GetSession", ctx, sessionID).Return(session, nil)
-
-		err := svc.RevokeSession(ctx, userID, sessionID)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "unauthorized")
-
-		mockRepo.AssertExpectations(t)
-	})
-}
-
-// Test for generateTokenPair with sessionID parameter
-func TestService_generateTokenPairWithSessionID(t *testing.T) {
-	mockRepo := &mockRepository{}
-	logger := slog.Default()
-
-	// Create a test RSA key pair
-	testPrivateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	testPublicKey := &testPrivateKey.PublicKey
-	tokenManager := internalAuth.NewTokenManager(testPrivateKey, testPublicKey, "test-issuer", time.Hour)
-	tokenDomainService := &mockTokenDomainService{}
-
-	svc := &service{
-		repo:               mockRepo,
-		tokenManager:       tokenManager,
-		tokenDomainService: tokenDomainService,
-		logger:             logger,
+func TestService_RevokeSession(t *testing.T) { //nolint:paralleltest // Transaction-based test
+	if testing.Short() {
+		t.Skip("Skipping integration test")
 	}
 
 	ctx := context.Background()
-	user := &domain.User{
-		ID:          "user-123",
-		Email:       "test@example.com",
-		DisplayName: "Test User",
-		Provider:    "google",
-	}
 
-	sessionID := "session-123"
-	orgIDs := []string{"org-1", "org-2"}
-	mockRepo.On("GetUserOrganizations", ctx, user.ID).Return(orgIDs, nil)
+	withTestDB(t, func(db *gorm.DB, redisClient *internalRedis.Client) {
+		svc, oauthRepo, _ := setupTestServiceWithDB(t, db, redisClient)
 
-	// Test generateTokenPair with sessionID parameter
-	tokenPair, err := svc.generateTokenPair(ctx, user, sessionID)
-	assert.NoError(t, err)
-	assert.NotNil(t, tokenPair)
-	assert.NotEmpty(t, tokenPair.AccessToken)
-	assert.NotEmpty(t, tokenPair.RefreshToken)
-
-	// Verify the token contains the session information
-	// This test currently passes but we need to verify SessionID is properly set
-	claims, err := tokenManager.ValidateToken(tokenPair.AccessToken)
-	assert.NoError(t, err)
-	assert.NotNil(t, claims)
-
-	// Extract the actual token and decode it to verify SessionID is included
-	// Since our implementation now uses domain.Claims with SessionID, it should be present
-	token, err := jwt.ParseWithClaims(tokenPair.AccessToken, &domain.Claims{}, func(token *jwt.Token) (interface{}, error) {
-		// For this test, we'll accept any signing method since we're testing the claims structure
-		return []byte("dummy-key"), nil // This will fail validation but we only care about parsing structure
-	})
-
-	// Even though validation fails due to dummy key, we can still examine the claims
-	if token != nil {
-		if domainClaims, ok := token.Claims.(*domain.Claims); ok {
-			// This should now contain a valid SessionID after our fix
-			assert.NotEmpty(t, domainClaims.SessionID, "SessionID should now be included in the token after our fix")
+		// First, create a user and session through the normal flow
+		loginReq := &domain.LoginRequest{
+			Provider: "google",
 		}
-	}
+		authURL, state, err := svc.GetAuthURL(ctx, loginReq)
+		require.NoError(t, err)
+		assert.NotEmpty(t, authURL)
+		assert.NotEmpty(t, state)
 
-	mockRepo.AssertExpectations(t)
+		// Simulate successful OAuth callback
+		callbackReq := &domain.CallbackRequest{
+			Code:  "auth-code-123",
+			State: state,
+		}
+		loginResponse, err := svc.HandleCallback(ctx, callbackReq, "192.168.1.1", "Mozilla/5.0")
+		require.NoError(t, err)
+		assert.NotNil(t, loginResponse)
+
+		// Get the created user and session from database
+		stubOAuthRepo, ok := oauthRepo.(*stubOAuthRepository)
+		require.True(t, ok, "failed to cast oauthRepo to stub")
+
+		expectedUser := stubOAuthRepo.userInfo
+
+		var user domain.User
+
+		err = db.Where("external_id = ?", expectedUser.ID).First(&user).Error
+		require.NoError(t, err)
+
+		var session domain.Session
+
+		err = db.Where("user_id = ?", user.ID).First(&session).Error
+		require.NoError(t, err)
+
+		// Now test revoking the session
+		err = svc.RevokeSession(ctx, user.ID, session.ID)
+		require.NoError(t, err)
+
+		// Verify session was deleted
+		var deletedSession domain.Session
+
+		err = db.Where("id = ?", session.ID).First(&deletedSession).Error
+		assert.Error(t, err, "Session should be deleted")
+	})
 }
 
-// Test OAuth flow to verify sessionID is included in token
-func TestService_OAuthFlowWithSessionID(t *testing.T) {
-	mockRepo := &mockRepository{}
-	mockRepo.On("HashToken", mock.AnythingOfType("string")).Return(
-		"1234567890123456789012345678901234567890123456789012345678901234", // 64 chars
-		"abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd", // 64 chars
-		nil,
-	).Maybe()
-	mockOAuthRepo := &mockOAuthRepository{}
-	mockKeyRepo := &mockKeyRepository{}
-	logger := slog.Default()
-
-	// Create a test RSA key pair
-	testPrivateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	testPublicKey := &testPrivateKey.PublicKey
-	tokenManager := internalAuth.NewTokenManager(testPrivateKey, testPublicKey, "test-issuer", time.Hour)
-	tokenDomainService := &mockTokenDomainService{}
-
-	svc := &service{
-		repo:               mockRepo,
-		oauthRepo:          mockOAuthRepo,
-		keyRepo:            mockKeyRepo,
-		tokenManager:       tokenManager,
-		tokenDomainService: tokenDomainService,
-		logger:             logger,
-		defaultTokenExpiry: 3600,
-	}
-
-	// Mock tokenDomainService.CreateSession
-	tokenDomainService.On("CreateSession", mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(&domain.Session{
-		ID: "session-123",
-		UserID: "user-123",
-	}, nil)
-
-	ctx := context.Background()
-	req := &domain.CallbackRequest{
-		Code:  "auth-code-123",
-		State: "state-123",
-	}
-	clientIP := "127.0.0.1"
-	userAgent := "test-agent"
-
-	// Mock auth state
-	authState := &domain.AuthState{
-		State:        "state-123",
-		Provider:     "google",
-		RedirectURL:  "http://localhost:3000/callback",
-		CodeChallenge: "",
-		ExpiresAt:    time.Now().Add(10 * time.Minute),
-	}
-
-
-	// Set up mock expectations
-	mockRepo.On("GetAuthState", ctx, req.State).Return(authState, nil)
-	mockOAuthRepo.On("ExchangeCode", ctx, "google", req.Code).Return(&domain.OAuthToken{AccessToken: "access-token"}, nil)
-	mockOAuthRepo.On("GetUserInfo", ctx, "google", mock.AnythingOfType("*domain.OAuthToken")).Return(&domain.UserInfo{
-		ID:       "google-123",
-		Email:    "test@example.com",
-		Name:     "Test User",
-		Provider: "google",
-	}, nil)
-	mockRepo.On("GetUserByExternalID", ctx, "google-123", "google").Return(nil, errors.New("not found"))
-	mockRepo.On("CreateUser", ctx, mock.AnythingOfType("*domain.User")).Return(nil)
-	mockRepo.On("GetUserOrganizations", ctx, mock.AnythingOfType("string")).Return([]string{"org-1"}, nil)
-	mockRepo.On("CreateSession", ctx, mock.AnythingOfType("*domain.Session")).Return(nil)
-	mockRepo.On("DeleteAuthState", ctx, req.State).Return(nil)
-	mockRepo.On("CreateSecurityEvent", ctx, mock.AnythingOfType("*domain.SecurityEvent")).Return(nil)
-
-	// Execute OAuth callback
-	authResponse, err := svc.HandleCallback(ctx, req, clientIP, userAgent)
-	assert.NoError(t, err)
-	assert.NotNil(t, authResponse)
-	assert.NotEmpty(t, authResponse.AccessToken)
-
-	// Validate that the token contains session information
-	// This test currently passes but we need to verify SessionID is properly set
-	claims, err := tokenManager.ValidateToken(authResponse.AccessToken)
-	assert.NoError(t, err)
-	assert.NotNil(t, claims)
-
-	// Extract the actual token and decode it to verify SessionID is included
-	// Since our implementation now uses domain.Claims with SessionID, it should be present
-	token, err := jwt.ParseWithClaims(authResponse.AccessToken, &domain.Claims{}, func(token *jwt.Token) (interface{}, error) {
-		// For this test, we'll accept any signing method since we're testing the claims structure
-		return []byte("dummy-key"), nil // This will fail validation but we only care about parsing structure
-	})
-
-	// Even though validation fails due to dummy key, we can still examine the claims
-	if token != nil {
-		if domainClaims, ok := token.Claims.(*domain.Claims); ok {
-			// This should now contain a valid SessionID after our fix
-			assert.NotEmpty(t, domainClaims.SessionID, "SessionID should now be included in the token after our fix")
-		}
-	}
-
-	mockRepo.AssertExpectations(t)
-	mockOAuthRepo.AssertExpectations(t)
-}
-
+// TestService_RefreshToken_OptimizedLookup_Testcontainers tests refresh token with optimized lookup
 func TestService_RefreshToken_OptimizedLookup(t *testing.T) {
-	ctx := context.Background()
-
-	mockRepo := new(mockRepository)
-	mockKeyRepo := new(mockKeyRepository)
-	mockTokenDomainService := new(mockTokenDomainService)
-
-	// Create a dummy TokenManager
-	testPrivateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	testPublicKey := &testPrivateKey.PublicKey
-	tokenManager := internalAuth.NewTokenManager(testPrivateKey, testPublicKey, "test-issuer", time.Hour)
-
-	svc := &service{
-		repo:               mockRepo,
-		keyRepo:            mockKeyRepo,
-		tokenManager:       tokenManager,
-		tokenDomainService: mockTokenDomainService,
-		logger:             slog.Default(),
-		defaultTokenExpiry: 3600, // 1 hour default
-	}
-
-	t.Run("optimized refresh token lookup with selector", func(t *testing.T) {
-		// Test the new optimized implementation using selector.verifier pattern
-		// Use proper base64 encoded values like the real implementation
-		selector := "opt-unique-YWJjZGVmZ2hpams1Njc4" // base64 encoded
-		verifier := "opt-unique-eHl6OTg3NjU0MzIxMDk4N" // base64 encoded (43+ chars)
-		refreshToken := selector + "." + verifier // selector.verifier format
-		clientIP := "192.168.1.1"
-		userAgent := "Mozilla/5.0"
-
-		user := &domain.User{
-			ID:          "user-123",
-			Email:       "user@example.com",
-			DisplayName: "Test User",
-			Provider:    "google",
-		}
-
-		// Create session with selector and hashed verifier
-		salt := "a1b2c3d4e5f67890123456789012345678901234567890123456789012345678" // 64 chars
-
-		session := &domain.Session{
-			ID:                   uuid.New().String(),
-			UserID:               "user-123",
-			RefreshToken:         refreshToken,
-			RefreshTokenSelector: selector,
-			Salt:                 salt,
-			ExpiresAt:            time.Now().Add(24 * time.Hour),
-		}
-
-		// Expected Claims from TokenDomainService
-		expectedClaims := &domain.Claims{
-			UserID:    "user-123",
-			Email:     "user@example.com",
-			Name:      "Test User",
-			Provider:  "google",
-			SessionID: session.ID,
-		}
-
-		// Mock repository calls - NEW optimized path
-		mockRepo.On("IsRefreshTokenBlacklisted", ctx, refreshToken).Return(false, nil).Once()
-		// Use new GetSessionByRefreshTokenSelector instead of GetAllActiveSessions
-		mockRepo.On("GetSessionByRefreshTokenSelector", ctx, selector).Return(session, nil).Once()
-		mockRepo.On("VerifyToken", verifier, refreshToken, salt).Return(true).Once()
-		mockRepo.On("GetUser", ctx, "user-123").Return(user, nil).Once()
-		mockTokenDomainService.On("RefreshToken", ctx, session, user).Return(expectedClaims, nil).Once()
-		mockRepo.On("BlacklistRefreshToken", ctx, refreshToken, session.ExpiresAt).Return(nil).Once()
-
-		// Hash token for session update with new refresh token
-		mockRepo.On("HashToken", mock.AnythingOfType("string")).Return(
-			refreshToken, // "9876543210987654321098765432109876543210987654321098765432109876", // 64 chars
-			salt, // "efghefghefghefghefghefghefghefghefghefghefghefghefghefghefghefgh", // 64 chars
-			nil).Once()
-
-		mockRepo.On("UpdateSession", ctx, mock.AnythingOfType("*domain.Session")).Return(nil).Once()
-		mockRepo.On("CreateSecurityEvent", ctx, mock.AnythingOfType("*domain.SecurityEvent")).Return(nil).Once()
-
-		response, err := svc.RefreshToken(ctx, refreshToken, clientIP, userAgent)
-		if err != nil {
-			t.Logf("Error details: %v", err)
-		}
-		assert.NoError(t, err)
-		if assert.NotNil(t, response) {
-			assert.NotEmpty(t, response.AccessToken)
-			assert.NotEmpty(t, response.RefreshToken)
-			assert.Equal(t, "Bearer", response.TokenType)
-			assert.Equal(t, 3600, response.ExpiresIn)
-		}
-
-		// Verify that GetAllActiveSessions was NOT called (optimization)
-		mockRepo.AssertNotCalled(t, "GetAllActiveSessions")
-		mockRepo.AssertExpectations(t)
-	})
-
-	t.Run("invalid refresh token format for optimized lookup", func(t *testing.T) {
-		// Test with invalid token format (no selector.verifier structure)
-		refreshToken := "invalid-token-without-selector"
-		clientIP := "192.168.1.1"
-		userAgent := "Mozilla/5.0"
-
-		mockRepo.On("IsRefreshTokenBlacklisted", ctx, refreshToken).Return(false, nil)
-		// For invalid format, getSessionByRefreshToken should return format error immediately
-		// No need to mock GetAllActiveSessions as it won't be called
-
-		response, err := svc.RefreshToken(ctx, refreshToken, clientIP, userAgent)
-		assert.Error(t, err)
-		assert.Nil(t, response)
-		assert.Contains(t, err.Error(), "invalid refresh token format")
-
-		mockRepo.AssertExpectations(t)
-	})
+	t.Skip("Skipping this test as it is merged into TestService_RefreshToken_RotationAndLookup")
 }

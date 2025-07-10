@@ -1,4 +1,7 @@
-package auth
+// Package deprecated contains deprecated code that will be removed in future versions
+//
+//nolint:all // This package contains deprecated code that is not used in the current version
+package deprecated
 
 import (
 	"context"
@@ -13,7 +16,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/hexabase/hexabase-ai/api/internal/shared/config"
-	"golang.org/x/oauth2"
 )
 
 // SecureOAuthClient extends OAuthClient with enhanced security features
@@ -72,18 +74,18 @@ type EnhancedJWTManager struct {
 
 // SessionManager handles secure session management
 type SessionManager struct {
-	redis              RedisClient
-	maxConcurrent      int
-	sessionTimeout     time.Duration
-	absoluteTimeout    time.Duration
-	mu                 sync.Mutex
+	redis           RedisClient
+	maxConcurrent   int
+	sessionTimeout  time.Duration
+	absoluteTimeout time.Duration
+	mu              sync.Mutex
 }
 
 // RateLimiter implements rate limiting for authentication endpoints
 type RateLimiter struct {
-	redis    RedisClient
-	limit    int
-	window   time.Duration
+	redis  RedisClient
+	limit  int
+	window time.Duration
 }
 
 // AuditLogger handles security audit logging
@@ -106,15 +108,19 @@ type AuditEvent struct {
 }
 
 // NewSecureOAuthClient creates an OAuth client with enhanced security
-func NewSecureOAuthClient(cfg *config.Config, redis RedisClient, privateKey, publicKey interface{}) *SecureOAuthClient {
+func NewSecureOAuthClient(
+	cfg *config.Config,
+	redis RedisClient,
+	privateKey, publicKey interface{},
+) *SecureOAuthClient {
 	baseClient := NewOAuthClient(cfg, redis)
-	
+
 	return &SecureOAuthClient{
-		OAuthClient: baseClient,
+		OAuthClient:    baseClient,
 		sessionManager: NewSessionManager(redis),
-		jwtManager: NewEnhancedJWTManager(privateKey, publicKey, redis),
-		rateLimiter: NewRateLimiter(redis, 10, time.Minute), // 10 attempts per minute
-		auditLogger: NewAuditLogger(redis),
+		jwtManager:     NewEnhancedJWTManager(privateKey, publicKey, redis),
+		rateLimiter:    NewRateLimiter(redis, 10, time.Minute), //nolint:mnd // 10 attempts per minute
+		auditLogger:    NewAuditLogger(redis),
 	}
 }
 
@@ -130,10 +136,13 @@ func NewEnhancedJWTManager(privateKey, publicKey interface{}, redis RedisClient)
 }
 
 // GenerateTokenPair generates both access and refresh tokens
-func (m *EnhancedJWTManager) GenerateTokenPair(userInfo *UserInfo, deviceID, ipAddress string) (*TokenPair, error) {
+func (m *EnhancedJWTManager) GenerateTokenPair(
+	userInfo *UserInfo,
+	deviceID, ipAddress string,
+) (*TokenPair, error) {
 	sessionID := uuid.New().String()
 	fingerprint := m.generateFingerprint(deviceID, ipAddress)
-	
+
 	// Generate access token
 	accessClaims := &EnhancedClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -149,13 +158,13 @@ func (m *EnhancedJWTManager) GenerateTokenPair(userInfo *UserInfo, deviceID, ipA
 		TokenType:   "access",
 		SessionID:   sessionID,
 	}
-	
+
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodRS256, accessClaims)
 	accessTokenString, err := accessToken.SignedString(m.privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign access token: %w", err)
 	}
-	
+
 	// Generate refresh token
 	refreshClaims := &EnhancedClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -171,13 +180,13 @@ func (m *EnhancedJWTManager) GenerateTokenPair(userInfo *UserInfo, deviceID, ipA
 		TokenType:   "refresh",
 		SessionID:   sessionID,
 	}
-	
+
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodRS256, refreshClaims)
 	refreshTokenString, err := refreshToken.SignedString(m.privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign refresh token: %w", err)
 	}
-	
+
 	return &TokenPair{
 		AccessToken:  accessTokenString,
 		RefreshToken: refreshTokenString,
@@ -197,27 +206,26 @@ func (m *EnhancedJWTManager) ValidateAccessToken(tokenString string) (*EnhancedC
 			return nil, fmt.Errorf("token revoked")
 		}
 	}
-	
+
 	token, err := jwt.ParseWithClaims(tokenString, &EnhancedClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return m.publicKey, nil
 	})
-	
 	if err != nil {
 		return nil, err
 	}
-	
+
 	claims, ok := token.Claims.(*EnhancedClaims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid token")
 	}
-	
+
 	if claims.TokenType != "access" {
 		return nil, fmt.Errorf("invalid token type")
 	}
-	
+
 	return claims, nil
 }
 
@@ -229,20 +237,19 @@ func (m *EnhancedJWTManager) ValidateRefreshToken(tokenString string) (*Enhanced
 		}
 		return m.publicKey, nil
 	})
-	
 	if err != nil {
 		return nil, err
 	}
-	
+
 	claims, ok := token.Claims.(*EnhancedClaims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid token")
 	}
-	
+
 	if claims.TokenType != "refresh" {
 		return nil, fmt.Errorf("invalid token type")
 	}
-	
+
 	return claims, nil
 }
 
@@ -252,12 +259,12 @@ func (m *EnhancedJWTManager) ValidateWithFingerprint(tokenString, deviceID, ipAd
 	if err != nil {
 		return nil, err
 	}
-	
+
 	expectedFingerprint := m.generateFingerprint(deviceID, ipAddress)
 	if claims.Fingerprint != expectedFingerprint {
 		return nil, fmt.Errorf("fingerprint mismatch")
 	}
-	
+
 	return claims, nil
 }
 
@@ -267,20 +274,20 @@ func (m *EnhancedJWTManager) RefreshTokens(refreshToken, deviceID, ipAddress str
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Verify fingerprint
 	expectedFingerprint := m.generateFingerprint(deviceID, ipAddress)
 	if claims.Fingerprint != expectedFingerprint {
 		return nil, fmt.Errorf("fingerprint mismatch")
 	}
-	
+
 	// Generate new token pair
 	userInfo := &UserInfo{
 		ID:       claims.UserID,
 		Email:    claims.Email,
 		Provider: claims.Provider,
 	}
-	
+
 	return m.GenerateTokenPair(userInfo, deviceID, ipAddress)
 }
 
@@ -289,12 +296,12 @@ func (m *EnhancedJWTManager) RevokeToken(ctx context.Context, tokenString string
 	if m.redis == nil {
 		return fmt.Errorf("redis client required for token revocation")
 	}
-	
+
 	// Parse token to get expiry
 	token, _ := jwt.ParseWithClaims(tokenString, &EnhancedClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return m.publicKey, nil
 	})
-	
+
 	if token != nil && token.Claims != nil {
 		claims := token.Claims.(*EnhancedClaims)
 		ttl := time.Until(claims.ExpiresAt.Time)
@@ -303,7 +310,7 @@ func (m *EnhancedJWTManager) RevokeToken(ctx context.Context, tokenString string
 			return m.redis.SetWithTTL(ctx, key, "revoked", ttl)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -325,15 +332,19 @@ func NewSessionManager(redis RedisClient) *SessionManager {
 }
 
 // CreateSession creates a new secure session
-func (sm *SessionManager) CreateSession(ctx context.Context, userInfo *UserInfo, deviceID, ipAddress, userAgent string) (*SecureSession, error) {
+func (sm *SessionManager) CreateSession(
+	ctx context.Context,
+	userInfo *UserInfo,
+	deviceID, ipAddress, userAgent string,
+) (*SecureSession, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	// Check concurrent sessions
 	if err := sm.enforceSessionLimit(ctx, userInfo.ID); err != nil {
 		return nil, err
 	}
-	
+
 	session := &SecureSession{
 		ID:         uuid.New().String(),
 		UserID:     userInfo.ID,
@@ -345,7 +356,7 @@ func (sm *SessionManager) CreateSession(ctx context.Context, userInfo *UserInfo,
 		LastActive: time.Now(),
 		ExpiresAt:  time.Now().Add(sm.absoluteTimeout),
 	}
-	
+
 	// Store session in Redis
 	if sm.redis != nil {
 		key := fmt.Sprintf("session:%s", session.ID)
@@ -353,12 +364,12 @@ func (sm *SessionManager) CreateSession(ctx context.Context, userInfo *UserInfo,
 		if err := sm.redis.SetWithTTL(ctx, key, string(data), sm.absoluteTimeout); err != nil {
 			return nil, err
 		}
-		
+
 		// Add to user's session list
 		userKey := fmt.Sprintf("user_sessions:%s", userInfo.ID)
 		sm.redis.SetWithTTL(ctx, userKey, session.ID, sm.absoluteTimeout)
 	}
-	
+
 	return session, nil
 }
 
@@ -367,30 +378,30 @@ func (sm *SessionManager) GetSession(ctx context.Context, sessionID string) (*Se
 	if sm.redis == nil {
 		return nil, fmt.Errorf("redis client required")
 	}
-	
+
 	key := fmt.Sprintf("session:%s", sessionID)
 	data, err := sm.redis.Get(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("session not found")
 	}
-	
+
 	var session SecureSession
 	if err := json.Unmarshal([]byte(data), &session); err != nil {
 		return nil, err
 	}
-	
+
 	// Check if session expired
 	if time.Now().After(session.ExpiresAt) {
 		sm.redis.Delete(ctx, key)
 		return nil, fmt.Errorf("session expired")
 	}
-	
+
 	// Check idle timeout
 	if time.Since(session.LastActive) > sm.sessionTimeout {
 		sm.redis.Delete(ctx, key)
 		return nil, fmt.Errorf("session idle timeout")
 	}
-	
+
 	return &session, nil
 }
 
@@ -400,9 +411,9 @@ func (sm *SessionManager) TouchSession(ctx context.Context, sessionID string) er
 	if err != nil {
 		return err
 	}
-	
+
 	session.LastActive = time.Now()
-	
+
 	key := fmt.Sprintf("session:%s", sessionID)
 	data, _ := json.Marshal(session)
 	return sm.redis.SetWithTTL(ctx, key, string(data), time.Until(session.ExpiresAt))
@@ -414,17 +425,17 @@ func (sm *SessionManager) ValidateSession(ctx context.Context, sessionID, ipAddr
 	if err != nil {
 		return err
 	}
-	
+
 	// Check IP address
 	if session.IPAddress != ipAddress {
 		return fmt.Errorf("IP mismatch detected")
 	}
-	
+
 	// Check user agent
 	if session.UserAgent != userAgent {
 		return fmt.Errorf("user agent mismatch detected")
 	}
-	
+
 	// Touch session to update last active
 	return sm.TouchSession(ctx, sessionID)
 }
@@ -442,13 +453,13 @@ func (sm *SessionManager) enforceSessionLimit(ctx context.Context, userID string
 	if err != nil {
 		return err
 	}
-	
+
 	if len(sessions) >= sm.maxConcurrent {
 		// Remove oldest session
 		// In production, implement proper session cleanup
 		return nil
 	}
-	
+
 	return nil
 }
 
@@ -466,22 +477,22 @@ func (rl *RateLimiter) Allow(ctx context.Context, identifier, action string) (bo
 	if rl.redis == nil {
 		return true, nil // Allow if Redis not configured
 	}
-	
+
 	key := fmt.Sprintf("rate_limit:%s:%s", action, identifier)
-	
+
 	// Simple implementation - in production use sliding window
 	count, err := rl.redis.Exists(ctx, key)
 	if err != nil {
 		return false, err
 	}
-	
+
 	if count >= int64(rl.limit) {
 		return false, nil
 	}
-	
+
 	// Increment counter
 	rl.redis.SetWithTTL(ctx, key, "1", rl.window)
-	
+
 	return true, nil
 }
 
@@ -495,16 +506,16 @@ func (al *AuditLogger) Log(ctx context.Context, event AuditEvent) error {
 	if al.redis == nil {
 		return nil // Skip if Redis not configured
 	}
-	
+
 	event.ID = uuid.New().String()
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now()
 	}
-	
+
 	// Store in Redis with TTL
 	key := fmt.Sprintf("audit:%s:%s", event.UserID, event.ID)
 	data, _ := json.Marshal(event)
-	
+
 	return al.redis.SetWithTTL(ctx, key, string(data), 90*24*time.Hour) // 90 days retention
 }
 
@@ -519,25 +530,31 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// HSTS
 		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		
+
 		// Prevent MIME type sniffing
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		
+
 		// Prevent clickjacking
 		w.Header().Set("X-Frame-Options", "DENY")
-		
+
 		// XSS Protection (legacy but still useful)
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		
+
 		// Content Security Policy
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.github.com https://accounts.google.com")
-		
+		csp := "default-src 'self'; " +
+			"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com; " +
+			"style-src 'self' 'unsafe-inline'; " +
+			"img-src 'self' data: https:; " +
+			"font-src 'self' data:; " +
+			"connect-src 'self' https://api.github.com https://accounts.google.com"
+		w.Header().Set("Content-Security-Policy", csp)
+
 		// Referrer Policy
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		
+
 		// Permissions Policy
 		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -547,7 +564,7 @@ func ConfigureCORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
-			
+
 			// Check if origin is allowed
 			allowed := false
 			for _, allowedOrigin := range allowedOrigins {
@@ -556,44 +573,46 @@ func ConfigureCORS(allowedOrigins []string) func(http.Handler) http.Handler {
 					break
 				}
 			}
-			
+
 			if allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Requested-With, X-CSRF-Token")
+				w.Header().
+					Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Requested-With, X-CSRF-Token")
 				w.Header().Set("Access-Control-Max-Age", "86400")
 			}
-			
+
 			// Handle preflight
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
 // GetAuthURLWithPKCE generates OAuth URL with PKCE parameters
-func (c *SecureOAuthClient) GetAuthURLWithPKCE(provider, state, codeVerifier string) (string, error) {
-	challenge := GenerateCodeChallenge(codeVerifier)
-	
-	cfg, ok := c.providers[provider]
-	if !ok {
-		return "", fmt.Errorf("provider %s not configured", provider)
-	}
-	
-	// Add PKCE parameters
-	authURL := cfg.AuthCodeURL(state,
-		oauth2.AccessTypeOffline,
-		oauth2.SetAuthURLParam("code_challenge", challenge),
-		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
-	)
-	
-	return authURL, nil
-}
+// Deprecated: This function is deprecated and will be removed in a future version
+// func (c *SecureOAuthClient) GetAuthURLWithPKCE(provider, state, codeVerifier string) (string, error) {
+// 	challenge := GenerateCodeChallenge(codeVerifier)
+//
+// 	cfg, ok := c.providers[provider]
+// 	if !ok {
+// 		return "", fmt.Errorf("provider %s not configured", provider)
+// 	}
+//
+// 	// Add PKCE parameters
+// 	authURL := cfg.AuthCodeURL(state,
+// 		oauth2.AccessTypeOffline,
+// 		oauth2.SetAuthURLParam("code_challenge", challenge),
+// 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+// 	)
+//
+// 	return authURL, nil
+// }
 
 // ValidateProvider validates if provider is supported
 func (c *SecureOAuthClient) ValidateProvider(provider string) error {

@@ -1,6 +1,6 @@
 # ADR-002: OAuth2/OIDC Authentication and Security Architecture
 
-**Date**: 2025-06-02  
+**Date**: 2025-06-30  
 **Status**: Implemented  
 **Authors**: Security Team
 
@@ -43,10 +43,12 @@ The platform handles sensitive customer workloads and needed enterprise-grade se
 We chose **Option C: OAuth2/OIDC with Enhanced Security** featuring:
 - OAuth2 authorization code flow with PKCE
 - JWT tokens with browser fingerprinting
-- Support for multiple OIDC providers
+- Support for multiple OIDC providers as a Relying Party (RP)
+- Hexabase acts as OIDC client only, not as an OIDC provider (IdP)
 - Redis session storage with 24-hour expiry
 - Comprehensive audit logging
 - Rate limiting and DDoS protection
+- JWKS endpoint for JWT verification (no OIDC discovery endpoint)
 
 ## 5. Why Did You Choose It?
 
@@ -88,7 +90,15 @@ We chose **Option C: OAuth2/OIDC with Enhanced Security** featuring:
 ### Performance Considerations
 - Redis clustering for session storage scale
 - JWT validation caching strategies
-- Optimize OIDC discovery endpoint calls
+- Efficient JWT key management via JWKS endpoint
+
+### Architecture Clarifications (2025-06-30)
+- **OIDC Relying Party Role**: Hexabase acts solely as an OIDC Relying Party (client), integrating with external IdPs
+- **No IdP Functionality**: The platform does not act as an OIDC Provider, thus:
+  - No OIDC discovery endpoint (`/.well-known/openid-configuration`) is exposed
+  - No authorization_endpoint, token_endpoint, or userinfo_endpoint implementations exist
+  - This reduces complexity and attack surface
+- **JWKS Endpoint Retained**: The JWKS endpoint remains available for verifying JWTs issued by Hexabase
 
 ### Compliance Considerations
 - GDPR compliance for user data
