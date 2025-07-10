@@ -1,0 +1,33 @@
+# Development docker-compose for running API with live logs
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up api
+
+services:
+  api:
+    # Override to not run in background
+    stdin_open: true
+    tty: true
+    # Add development environment variables
+    environment:
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_USER=postgres
+      - DATABASE_PASSWORD=postgres
+      - DATABASE_DBNAME=hexabase
+      - DATABASE_SSLMODE=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NATS_URL=nats://nats:4222
+      - AUTH_JWT_SECRET=dev-jwt-secret-change-in-production
+      - STRIPE_SECRET_KEY=sk_test_your_key_here
+      - STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+      - GIN_MODE=debug
+      - SERVER_PORT=8080
+      - AUTH_EXTERNAL_PROVIDERS_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - AUTH_EXTERNAL_PROVIDERS_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - AUTH_EXTERNAL_PROVIDERS_GOOGLE_REDIRECT_URL=http://localhost:3600/auth/callback/google
+      - AUTH_EXTERNAL_PROVIDERS_GOOGLE_SCOPES=openid,email,profile
+    # For development, rebuild the image
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+      no_cache: true

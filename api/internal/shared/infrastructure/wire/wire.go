@@ -350,6 +350,9 @@ func ProvideProxmoxRepository(cfg *config.Config) *nodeRepo.ProxmoxRepository {
 }
 
 func ProvideMetricsClientset(k8sConfig *rest.Config) (versioned.Interface, error) {
+	if k8sConfig == nil {
+		return nil, nil
+	}
 	return versioned.NewForConfig(k8sConfig)
 }
 
