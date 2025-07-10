@@ -1,11 +1,11 @@
-package auth_test
+package deprecated_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/hexabase/hexabase-ai/api/internal/auth"
+	"github.com/hexabase/hexabase-ai/api/internal/auth/deprecated"
 	"github.com/hexabase/hexabase-ai/api/internal/shared/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -50,7 +50,7 @@ func TestOAuthClient_GenerateAndStoreState(t *testing.T) {
 		return len(key) > len("oauth_state:")
 	}), "valid", 10*time.Minute).Return(nil)
 
-	client := auth.NewOAuthClient(cfg, mockRedis)
+	client := deprecated.NewOAuthClient(cfg, mockRedis)
 
 	ctx := context.Background()
 	state, err := client.GenerateAndStoreState(ctx)
@@ -70,7 +70,7 @@ func TestOAuthClient_ValidateAndConsumeState_Valid(t *testing.T) {
 	// Expect state to be retrieved and deleted from Redis
 	mockRedis.On("GetDel", mock.Anything, expectedKey).Return("valid", nil)
 
-	client := auth.NewOAuthClient(cfg, mockRedis)
+	client := deprecated.NewOAuthClient(cfg, mockRedis)
 
 	ctx := context.Background()
 	err := client.ValidateAndConsumeState(ctx, testState)
@@ -89,7 +89,7 @@ func TestOAuthClient_ValidateAndConsumeState_Invalid(t *testing.T) {
 	// Expect state to be not found in Redis
 	mockRedis.On("GetDel", mock.Anything, expectedKey).Return("", assert.AnError)
 
-	client := auth.NewOAuthClient(cfg, mockRedis)
+	client := deprecated.NewOAuthClient(cfg, mockRedis)
 
 	ctx := context.Background()
 	err := client.ValidateAndConsumeState(ctx, testState)
@@ -103,7 +103,7 @@ func TestOAuthClient_ValidateAndConsumeState_EmptyState(t *testing.T) {
 	cfg := &config.Config{}
 	mockRedis := new(MockRedisClient)
 
-	client := auth.NewOAuthClient(cfg, mockRedis)
+	client := deprecated.NewOAuthClient(cfg, mockRedis)
 
 	ctx := context.Background()
 	err := client.ValidateAndConsumeState(ctx, "")
@@ -116,7 +116,7 @@ func TestOAuthClient_ValidateAndConsumeState_EmptyState(t *testing.T) {
 
 func TestOAuthClient_WithoutRedis(t *testing.T) {
 	cfg := &config.Config{}
-	client := auth.NewOAuthClient(cfg, nil)
+	client := deprecated.NewOAuthClient(cfg, nil)
 
 	ctx := context.Background()
 

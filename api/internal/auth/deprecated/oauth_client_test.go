@@ -1,11 +1,11 @@
-package auth_test
+package deprecated_test
 
 import (
 	"context"
 	"encoding/base64"
 	"testing"
 
-	"github.com/hexabase/hexabase-ai/api/internal/auth"
+	"github.com/hexabase/hexabase-ai/api/internal/auth/deprecated"
 	"github.com/hexabase/hexabase-ai/api/internal/shared/config"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/oauth2"
@@ -31,7 +31,7 @@ func TestOAuthClient_NewOAuthClient(t *testing.T) {
 		},
 	}
 
-	client := auth.NewOAuthClient(cfg, nil)
+	client := deprecated.NewOAuthClient(cfg, nil)
 	assert.NotNil(t, client)
 }
 
@@ -55,7 +55,7 @@ func TestOAuthClient_GetAuthURL(t *testing.T) {
 		},
 	}
 
-	client := auth.NewOAuthClient(cfg, nil)
+	client := deprecated.NewOAuthClient(cfg, nil)
 
 	// Test Google provider
 	authURL, err := client.GetAuthURL("google", "test-state")
@@ -82,7 +82,7 @@ func TestOAuthClient_GetAuthURL(t *testing.T) {
 
 func TestOAuthClient_GenerateState(t *testing.T) {
 	cfg := &config.Config{}
-	client := auth.NewOAuthClient(cfg, nil)
+	client := deprecated.NewOAuthClient(cfg, nil)
 
 	state1, err := client.GenerateState()
 	assert.NoError(t, err)
@@ -101,7 +101,7 @@ func TestOAuthClient_GenerateState(t *testing.T) {
 
 func TestOAuthClient_ValidateState(t *testing.T) {
 	cfg := &config.Config{}
-	client := auth.NewOAuthClient(cfg, nil)
+	client := deprecated.NewOAuthClient(cfg, nil)
 
 	// Valid state
 	state, err := client.GenerateState()
@@ -117,7 +117,7 @@ func TestOAuthClient_ValidateState(t *testing.T) {
 
 func TestOAuthClient_ExchangeCode_InvalidProvider(t *testing.T) {
 	cfg := &config.Config{}
-	client := auth.NewOAuthClient(cfg, nil)
+	client := deprecated.NewOAuthClient(cfg, nil)
 
 	ctx := context.Background()
 	token, err := client.ExchangeCode(ctx, "invalid", "test-code")
@@ -128,7 +128,7 @@ func TestOAuthClient_ExchangeCode_InvalidProvider(t *testing.T) {
 
 func TestOAuthClient_GetUserInfo_InvalidProvider(t *testing.T) {
 	cfg := &config.Config{}
-	client := auth.NewOAuthClient(cfg, nil)
+	client := deprecated.NewOAuthClient(cfg, nil)
 
 	ctx := context.Background()
 	token := &oauth2.Token{
