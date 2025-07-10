@@ -171,7 +171,7 @@ type SecurityEvent struct {
 	IPAddress   string                 `json:"ip_address"`
 	UserAgent   string                 `json:"user_agent"`
 	Level       string                 `json:"level"` // info, warning, critical
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Metadata    map[string]interface{} `gorm:"type:jsonb" json:"metadata,omitempty"`
 	CreatedAt   time.Time              `json:"created_at"`
 }
 

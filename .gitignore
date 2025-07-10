@@ -181,4 +181,4 @@ tramp
 .\#*
 
 # Local environment configuration
-.envrc
+.envrc.env.oauth
