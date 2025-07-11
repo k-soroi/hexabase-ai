@@ -3,16 +3,13 @@
 .PHONY: build clean test run-mock-server help
 
 # Build all authentication plugins
-build: build-auth-plugin build-auth-plugin-simple build-mock-server build-test-auth-plugin
+build: build-auth-plugin build-mock-server build-test-auth-plugin
 
 # Build individual components
 build-auth-plugin:
 	@echo "Building full-featured auth plugin..."
 	go build -o bin/auth-plugin cmd/auth-plugin/main.go
 
-build-auth-plugin-simple:
-	@echo "Building simple auth plugin..."
-	go build -o bin/auth-plugin-simple cmd/auth-plugin-simple/main.go
 
 build-mock-server:
 	@echo "Building mock OIDC server..."
@@ -51,7 +48,6 @@ help:
 	@echo "Available targets:"
 	@echo "  build                 - Build all components"
 	@echo "  build-auth-plugin     - Build full-featured auth plugin"
-	@echo "  build-auth-plugin-simple - Build simple auth plugin"
 	@echo "  build-mock-server     - Build mock OIDC server"
 	@echo "  build-test-auth-plugin - Build test auth plugin"
 	@echo "  clean                 - Clean build artifacts"

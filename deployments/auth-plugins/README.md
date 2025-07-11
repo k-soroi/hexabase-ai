@@ -88,11 +88,6 @@ Full-featured OIDC authentication plugin with:
 - JWKS public key verification
 - Secure token caching
 
-### 🔌 Simple Auth Plugin (`cmd/auth-plugin-simple/`)
-Simplified version supporting:
-- ServiceAccount token compatibility
-- Basic token caching
-- Lightweight implementation
 
 ### 🖥️ Mock OIDC Server (`cmd/mock-server/`)
 Development OIDC server providing:
